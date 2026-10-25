@@ -1,0 +1,22 @@
+[
+  {
+    "stepTitle": "卸载应用",
+    "items": [
+      {
+        "type": "text",
+        "field": "CUSTOM_CONFIRMED",
+        "label": "卸载将停止下载服务，已下载的文件会保留。请输入「确认」后继续",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入「确认」后继续"
+          },
+          {
+            "pattern": "^确认$",
+            "message": "请输入「确认」后继续"
+          }
+        ]
+      }
+    ]
+  }
+]
