@@ -1,0 +1,5 @@
+#!/bin/bash
+. $(dirname $0)"/config"
+step_log "uninstall_callback"
+rm -f "${DSH_SOCK}" 2>/dev/null
+exit 0
