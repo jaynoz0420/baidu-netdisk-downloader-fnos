@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# 打印日志
+print_log() {
+    if [ -z "${SVC_QUIET}" ]; then
+        local _msg_="$@"
+        if [ -z "${_msg_}" ]; then
+            while IFS=$'\n' read -r line; do
+                print_log "${line}"
+            done
+        else
+            echo -e "$(date +'%Y/%m/%d %H:%M:%S')\t${_msg_}" 1>&2
+        fi
+    fi
+}
+
+# 打印执行日志
+step_log() {
+    print_log "===> Step $1. TRIM_APP_STATUS=${TRIM_APP_STATUS} TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME} TRIM_RUN_GROUPNAME=${TRIM_RUN_GROUPNAME}"
+}
+
+# 检查并创建必要目录
+check_dir() {
+    echo "call func: check_dir"
+    if [ ! -d "${TRIM_PKGVAR}/log" ]; then
+        echo "  create log dir"
+        mkdir -p "${TRIM_PKGVAR}/log"
+    fi
+    if [ ! -d "${DATA_DIR}" ]; then
+        echo "  create data dir: ${DATA_DIR}"
+        mkdir -p "${DATA_DIR}"
+    fi
+    # Python 缓存目录 (避免写入应用目录失败)
+    mkdir -p "${DATA_DIR}/pycache" 2>/dev/null
+    chmod 755 "${DATA_DIR}" 2>/dev/null
+}
+
+# 按 BIN 查找进程
+find_process_using_bin() {
+    pid=$(pgrep -f "${BIN}.*${MAIN_PY}" | head -1)
+    if [ -n "$pid" ]; then
+        return 0
+    fi
+    return 1
+}
