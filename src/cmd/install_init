@@ -1,0 +1,3 @@
+#!/bin/bash
+step_log "install_init"
+exit 0
