@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+dist/
+*.fpk
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+*.log
+
+publish.py
+
+push_existing.py
+publish2.py
+publish3.py
