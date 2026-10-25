@@ -1,0 +1,36 @@
+#!/bin/bash
+
+. $(dirname $0)"/config"
+. $(dirname $0)"/common"
+. $(dirname $0)"/service"
+
+case $1 in
+start)
+    if status_daemon; then
+        print_log "already running" >>"${LOG_FILE}"
+        exit 0
+    else
+        print_log "Starting ..." >>"${LOG_FILE}"
+        start_daemon
+        exit $?
+    fi
+    ;;
+stop)
+    stop_daemon
+    exit $?
+    ;;
+restart)
+    stop_daemon
+    sleep 2
+    start_daemon
+    exit $?
+    ;;
+status)
+    status_daemon
+    exit $?
+    ;;
+*)
+    echo "usage: $0 {start|stop|restart|status}"
+    exit 1
+    ;;
+esac
