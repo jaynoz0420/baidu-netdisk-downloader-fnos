@@ -1,0 +1,7 @@
+#!/bin/bash
+. $(dirname $0)"/config"
+. $(dirname $0)"/common"
+step_log "upgrade_callback"
+check_dir
+find "${TRIM_APPDEST}" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+exit 0
