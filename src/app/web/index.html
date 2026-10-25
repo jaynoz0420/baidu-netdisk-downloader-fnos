@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>百度网盘下载器</title>
+<script>
+  // 计算资源基址: 兼容直连(/)与 fnOS CGI 通道(/cgi/ThirdParty/<app>/index.cgi/)
+  (function () {
+    var p = location.pathname;
+    var m = p.match(/^(.*?\/cgi\/ThirdParty\/[^\/]+\/index\.cgi)/);
+    window.__BASE__ = m ? (m[1] + "/") : "/";
+    document.write('<link rel="stylesheet" href="' + window.__BASE__
+      + 'static/style.css">');
+  })();
+</script>
+</head>
+<body>
+
+<div id="app">
+  <!-- 顶部 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">☁</span>
+      <span>百度网盘下载器</span>
+      <span class="badge" id="verBadge">v1.0.0</span>
+    </div>
+    <div class="top-right">
+      <span class="user" id="userInfo">未登录</span>
+      <button class="btn ghost sm" id="btnLogout" style="display:none">退出</button>
+    </div>
+  </header>
+
+  <!-- 未登录 -->
+  <section id="loginView" class="login-wrap">
+    <div class="card login-card">
+      <h2>登录百度网盘</h2>
+      <div class="tabs">
+        <button class="tab active" data-tab="qr">扫码登录</button>
+        <button class="tab" data-tab="cookie">Cookie 登录</button>
+      </div>
+
+      <div id="tabQr" class="tab-pane">
+        <div class="qr-box">
+          <img id="qrImg" alt="二维码" />
+          <div id="qrMask" class="qr-mask">加载中…</div>
+        </div>
+        <p class="hint" id="qrMsg">请使用百度 App 扫码登录</p>
+        <button class="btn ghost sm" id="btnQrRefresh">刷新二维码</button>
+      </div>
+
+      <div id="tabCookie" class="tab-pane" style="display:none">
+        <p class="hint">
+          从 PC 版百度网盘提取 <code>BDUSS</code>，或粘贴完整 cookie 串。
+        </p>
+        <textarea id="cookieInput" rows="5"
+          placeholder="BDUSS=xxxxxx; STOKEN=xxxxxx"></textarea>
+        <button class="btn primary" id="btnCookieLogin">登录</button>
+        <p class="hint" id="cookieMsg"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 主界面 -->
+  <section id="mainView" style="display:none">
+    <nav class="tabs main-tabs">
+      <button class="tab active" data-view="cloud">网盘文件</button>
+      <button class="tab" data-view="tasks">下载任务 <span class="dot" id="taskDot"></span></button>
+      <button class="tab" data-view="local">本地目录</button>
+      <button class="tab" data-view="settings">设置</button>
+    </nav>
+
+    <!-- 网盘文件 -->
+    <div id="viewCloud" class="view">
+      <div class="toolbar">
+        <button class="btn ghost sm" id="btnUp">↑ 上级</button>
+        <span class="path" id="cloudPath">/</span>
+        <div class="sort-box">
+          <span class="sort-label">排序</span>
+          <button class="sort-btn active" data-order="time" data-desc="1">修改时间 ↓</button>
+          <button class="sort-btn" data-order="time" data-desc="0">修改时间 ↑</button>
+          <button class="sort-btn" data-order="name" data-desc="0">名称 A→Z</button>
+          <button class="sort-btn" data-order="name" data-desc="1">名称 Z→A</button>
+        </div>
+        <button class="btn ghost sm" id="btnRefreshCloud">刷新</button>
+      </div>
+
+      <!-- 批量操作栏 -->
+      <div class="batch-bar" id="batchBar" style="display:none">
+        <label class="chk-label">
+          <input type="checkbox" id="chkAll"> 全选
+        </label>
+        <span class="sel-info" id="selInfo">已选 0 项</span>
+        <button class="btn primary sm" id="btnBatchDownload">下载选中</button>
+        <button class="btn ghost sm" id="btnClearSel">清空</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="file-table">
+          <thead><tr>
+            <th class="col-chk"><input type="checkbox" id="chkAllHead"></th>
+            <th>名称</th><th class="col-size">大小</th><th class="col-time">修改时间</th><th class="col-act">操作</th>
+          </tr></thead>
+          <tbody id="cloudBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 下载任务 -->
+    <div id="viewTasks" class="view" style="display:none">
+      <div class="toolbar">
+        <button class="btn ghost sm" id="btnRefreshTasks">刷新</button>
+        <span class="hint" id="taskSummary"></span>
+      </div>
+
+      <!-- 总速度总览 -->
+      <div class="speed-panel" id="speedPanel">
+        <div class="speed-main">
+          <span class="speed-num" id="totalSpeed">0.00</span>
+          <span class="speed-unit">MB/s</span>
+          <span class="speed-label">总速度</span>
+        </div>
+        <div class="speed-detail">
+          <span id="speedRunning">运行中 0</span>
+          <span id="speedQueued">排队 0</span>
+          <span id="speedDone">已完成 0</span>
+          <span id="speedPaused">已暂停 0</span>
+          <span id="speedTotalBytes">已下载 0 B</span>
+        </div>
+        <div class="speed-spark" id="speedSpark"></div>
+      </div>
+
+      <!-- 批量操作栏 -->
+      <div class="batch-bar" id="taskBatchBar">
+        <label class="chk-label">
+          <input type="checkbox" id="taskChkAll"> 全选
+        </label>
+        <span class="sel-info" id="taskSelInfo">已选 0 项</span>
+        <button class="btn ghost sm" id="btnTaskPauseAll">全部暂停</button>
+        <button class="btn ghost sm" id="btnTaskResumeAll">全部开始</button>
+        <button class="btn ghost sm" id="btnTaskBatchPause" disabled>暂停选中</button>
+        <button class="btn ghost sm" id="btnTaskBatchResume" disabled>开始选中</button>
+        <button class="btn danger sm" id="btnTaskDeleteDone">清除已完成</button>
+        <button class="btn danger sm" id="btnTaskBatchDelete" disabled>删除选中</button>
+      </div>
+
+      <div id="taskList" class="task-list">
+        <div class="empty">暂无任务</div>
+      </div>
+    </div>
+
+    <!-- 本地目录 -->
+    <div id="viewLocal" class="view" style="display:none">
+      <div class="toolbar">
+        <button class="btn ghost sm" id="btnUpLocal">↑ 上级</button>
+        <span class="path" id="localPath">/</span>
+        <button class="btn ghost sm" id="btnRefreshLocal">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table class="file-table">
+          <thead><tr><th>名称</th><th class="col-size">大小</th><th class="col-act">操作</th></tr></thead>
+          <tbody id="localBody"><tr><td colspan="3" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 设置 -->
+    <div id="viewSettings" class="view" style="display:none">
+      <div class="card">
+        <h3>下载设置</h3>
+        <div class="form-row">
+          <label>默认下载目录</label>
+          <input id="setDir" type="text" placeholder="/vol1/1001/Backup">
+          <button class="btn ghost sm" id="btnPickDefaultDir">浏览…</button>
+        </div>
+        <div class="form-row">
+          <label>单任务并发</label>
+          <input id="setConns" type="number" min="1" max="128" value="64">
+          <span class="hint">建议 64；实测 64 连接最快</span>
+        </div>
+        <div class="form-row">
+          <label>总连接预算</label>
+          <input id="setTotalConns" type="number" min="4" max="128" value="64">
+          <span class="hint">所有任务合计的连接上限，超过 64 反而更慢</span>
+        </div>
+        <div class="form-row">
+          <label>同时下载任务数</label>
+          <input id="setMaxActive" type="number" min="1" max="3" value="1">
+          <span class="hint">默认 1，最高 3。1 个任务能跑满带宽</span>
+        </div>
+        <div class="form-row">
+          <label>总下载限速</label>
+          <input id="setSpeedLimit" type="number" min="0" max="500"
+                 step="0.5" value="0">
+          <span class="hint">MB/s。所有任务合计上限，0 = 不限速（最大速率）</span>
+        </div>
+
+        <button class="btn primary" id="btnSaveSettings">保存</button>
+        <p class="hint" id="setMsg"></p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ========== 目录选择弹窗 ========== -->
+<div id="dirPicker" class="modal-mask" style="display:none">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="dirPickerTitle">选择下载目录</h3>
+      <button class="modal-close" id="dirPickerClose">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="toolbar" style="margin-bottom:10px">
+        <button class="btn ghost sm" id="dpUp">↑ 上级</button>
+        <span class="path" id="dpPath">/</span>
+        <button class="btn ghost sm" id="dpRefresh">刷新</button>
+      </div>
+      <div class="dp-list" id="dpList">
+        <div class="empty">加载中…</div>
+      </div>
+      <p class="hint" style="text-align:left;margin-top:8px">
+        提示：双击文件夹进入，点击一次选中。也可以直接在下方输入路径。
+      </p>
+      <input id="dpManual" type="text" placeholder="/vol1/1001/电影"
+             style="width:100%;border:1px solid var(--line);border-radius:8px;
+                    padding:8px 12px;font-size:13px;font-family:monospace">
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn ghost" id="dirPickerCancel">取消</button>
+      <button class="btn primary" id="dirPickerOk">确定使用此目录</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script>
+  document.write('<script src="' + window.__BASE__ + 'static/app.js"><\/script>');
+</script>
+</body>
+</html>
