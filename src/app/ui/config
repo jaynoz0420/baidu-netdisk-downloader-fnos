@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "baidu.nasdl": {
+            "title": "百度网盘下载器",
+            "desc": "百度网盘下载器",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "url": "/cgi/ThirdParty/baidu.nasdl/index.cgi/",
+            "allUsers": false
+        }
+    }
+}
