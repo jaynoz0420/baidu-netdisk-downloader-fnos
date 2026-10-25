@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# ============ 基础配置 ============
+FWPORTS_FILE="${TRIM_PKGETC}/${TRIM_APPNAME}.sc"
+PORT=-1
+
+# ============ 路径 ============
+APP_ROOT="${TRIM_APPDEST}"
+BIN="/usr/bin/python3"
+MAIN_PY="${APP_ROOT}/server.py"
+
+DATA_DIR="${TRIM_PKGVAR}"
+LOG_FILE="${TRIM_PKGVAR}/${TRIM_APPNAME}.log"
+PID_FILE="${TRIM_PKGVAR}/${TRIM_APPNAME}.pid"
+SOCK_PATH="/var/run/${TRIM_APPNAME}.sock"
+
+# 直连端口 (nginx 反代未生效时的兜底入口)
+APP_PORT=18080
+
+SVC_CWD="${TRIM_PKGVAR}"
+SVC_WAIT_TIMEOUT=15
+SVC_BACKGROUND=y
+SVC_WRITE_PID=y
+SVC_QUIET=
+
+export DSH_MAIN_PY="${MAIN_PY}"
+export DSH_DATA_DIR="${DATA_DIR}"
+export DSH_SOCK="${SOCK_PATH}"
+export DSH_LOG="${LOG_FILE}"
+export DSH_APP_PORT="${APP_PORT}"
