@@ -1,0 +1,6 @@
+#!/bin/bash
+. $(dirname $0)"/config"
+. $(dirname $0)"/common"
+step_log "install_callback"
+check_dir
+exit 0
