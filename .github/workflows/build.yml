@@ -1,0 +1,41 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build fpk
+        run: python3 build.py
+
+      - name: Verify package
+        run: |
+          ls -la dist/
+          python3 - <<'EOF'
+          import glob, gzip, io, tarfile, zlib
+          f = glob.glob("dist/*.fpk")[0]
+          raw = open(f, "rb").read()
+          d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+          buf = d.decompress(raw) + d.flush()
+          tf = tarfile.open(fileobj=io.BytesIO(buf))
+          names = tf.getnames()
+          assert "manifest" in names, "manifest missing"
+          assert "app.tgz" in names, "app.tgz missing"
+          print("OK:", f, len(raw), "bytes,", len(names), "members")
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fpk
+          path: dist/*.fpk
