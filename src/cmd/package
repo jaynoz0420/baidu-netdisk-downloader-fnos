@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# 安装初始化
+install_init() {
+    step_log "install_init"
+    exit 0
+}
+
+# 安装回调
+install_callback() {
+    step_log "install_callback"
+    check_dir
+
+    # 建立默认下载目录 (用户可在页面修改)
+    DEFAULT_DIR="${TRIM_PKGVAR}/downloads"
+    mkdir -p "${DEFAULT_DIR}" 2>/dev/null
+    chmod 755 "${DEFAULT_DIR}" 2>/dev/null
+
+    # 预置配置
+    CFG="${DATA_DIR}/config.json"
+    if [ ! -f "${CFG}" ]; then
+        cat > "${CFG}" <<EOF
+{
+  "cookie": "",
+  "bdstoken": "",
+  "uk": "",
+  "user_name": "",
+  "download_dir": "${DEFAULT_DIR}",
+  "conns": 32
+}
+EOF
+        chmod 644 "${CFG}" 2>/dev/null
+    fi
+
+    # 清理 Python 缓存
+    find "${TRIM_APPDEST}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
+
+    echo "install done. download dir: ${DEFAULT_DIR}"
+    exit 0
+}
+
+# 卸载初始化
+uninstall_init() {
+    step_log "uninstall_init"
+    exit 0
+}
+
+# 卸载回调
+uninstall_callback() {
+    step_log "uninstall_callback"
+
+    # 停止进程
+    if [ -n "${DSH_SOCK}" ]; then
+        rm -f "${DSH_SOCK}" 2>/dev/null
+    fi
+
+    if [ "$CUSTOM_CONFIRMED" = "确认" ]; then
+        print_log "uninstall_callback" "user confirmed data removal"
+    fi
+    exit 0
+}
+
+# 更新初始化
+upgrade_init() {
+    step_log "upgrade_init"
+    exit 0
+}
+
+# 更新回调
+upgrade_callback() {
+    step_log "upgrade_callback"
+    check_dir
+    # 保留原配置
+    find "${TRIM_APPDEST}" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
+    exit 0
+}
