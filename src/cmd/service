@@ -1,0 +1,185 @@
+#!/bin/bash
+
+# 启动应用
+start_daemon() {
+    print_log "start_daemon" "Starting ${TRIM_APPNAME} ..."
+
+    if [ -n "${SVC_CWD}" ]; then
+        cd "${SVC_CWD}" || true
+    fi
+
+    # 清理残留 socket
+    rm -f "${DSH_SOCK}" 2>/dev/null
+
+    echo "$(date +%s)" > "${TRIM_PKGVAR}/start_time" 2>/dev/null
+
+    # 启动 (后台, 同时监听 unix socket 与 TCP)
+    PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 \
+    nohup "${BIN}" "${DSH_MAIN_PY}" \
+        --sock "${DSH_SOCK}" \
+        --port "${DSH_APP_PORT}" \
+        --data "${DSH_DATA_DIR}" \
+        > "${DSH_LOG}" 2>&1 &
+
+    daemon_pid=$!
+    print_log "start_daemon" "started pid=${daemon_pid}"
+
+    if [ -n "${SVC_WRITE_PID}" ] && [ -n "${SVC_BACKGROUND}" ]; then
+        printf "%s" "${daemon_pid}" > "${PID_FILE}"
+    fi
+
+    # 等待服务就绪 (socket + HTTP 都要能响应)
+    local i=0
+    local ready=0
+    while [ $i -lt 60 ]; do
+        if [ -S "${DSH_SOCK}" ]; then
+            # socket 存在还不够, 再确认 HTTP 真的能应答
+            if curl -s -m 2 "http://127.0.0.1:${DSH_APP_PORT}/api/ping" 2>/dev/null \
+                 | grep -q '"ok"'; then
+                print_log "start_daemon" "socket ready: ${DSH_SOCK}"
+                ready=1
+                break
+            fi
+        fi
+        if ! kill -0 "${daemon_pid}" 2>/dev/null; then
+            # 进程已退出: 可能是锁接管后自己退出, 或彻底失败
+            print_log "start_daemon" "process exited, see log: ${DSH_LOG}"
+            tail -20 "${DSH_LOG}" 2>/dev/null 1>&2
+            return 1
+        fi
+        sleep 0.5
+        i=$((i + 1))
+    done
+
+    if [ "$ready" != "1" ]; then
+        print_log "start_daemon" "启动超时: 服务未就绪 (socket/端口无响应)"
+        tail -20 "${DSH_LOG}" 2>/dev/null 1>&2
+        return 1
+    fi
+
+    # fnOS 第三方应用入口: /cgi/ThirdParty/{appname}/index.cgi
+    local URL="/cgi/ThirdParty/${TRIM_APPNAME}/index.cgi"
+    echo "${URL}/" > "${TRIM_PKGVAR}/entry_url" 2>/dev/null
+
+    # 同步 ui/config (确保地址与 cgi 入口一致)
+    local UICFG="${TRIM_APPDEST}/ui/config"
+    if [ -d "$(dirname "$UICFG")" ]; then
+        cat > "$UICFG" <<EOF
+{
+    ".url": {
+        "${TRIM_APPNAME}": {
+            "title": "百度网盘下载器",
+            "desc": "百度网盘下载器",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "url": "${URL}/",
+            "allUsers": false
+        }
+    }
+}
+EOF
+        print_log "start_daemon" "ui/config -> ${URL}/"
+    fi
+
+    # 确保 CGI 入口可执行
+    local CGIF="${TRIM_APPDEST}/ui/index.cgi"
+    if [ -f "$CGIF" ]; then
+        chmod 755 "$CGIF" 2>/dev/null
+        # 记录后端端口供 cgi 使用
+        echo "${DSH_APP_PORT}" > "${TRIM_PKGVAR}/backend_port" 2>/dev/null
+        print_log "start_daemon" "index.cgi ok (后端端口 ${DSH_APP_PORT})"
+    else
+        print_log "start_daemon" "警告: index.cgi 缺失, 图标入口不可用"
+    fi
+
+    sleep 1
+    return 0
+}
+
+# 检查 PID 文件有效性
+check_pid_file_valid() {
+    if [ -r "${PID_FILE}" ]; then
+        pid=$(cat "${PID_FILE}" 2>/dev/null)
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "${PID_FILE}" 2>/dev/null
+    fi
+    return 1
+}
+
+# 通过命令行查找进程
+find_process_by_binary() {
+    local target_pid
+    target_pid=$(pgrep -f "${BIN}.*${MAIN_PY}" | head -1)
+    if [ -n "${target_pid}" ]; then
+        pid=${target_pid}
+        printf "%s" "${pid}" > "${PID_FILE}" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
+# 等待进程停止
+wait_for_process_stop() {
+    local max_retries=$1
+    local interval=$2
+    local n=0
+    while [ $n -lt "${max_retries}" ]; do
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            return 0
+        fi
+        sleep "${interval}"
+        n=$((n + 1))
+    done
+    return 1
+}
+
+# 清理 PID 文件
+cleanup_pid_file() {
+    rm -f "${PID_FILE}" 2>/dev/null
+}
+
+# 停止应用
+stop_daemon() {
+    print_log "stop_daemon" "Stopping ..."
+
+    if check_pid_file_valid; then
+        print_log "stop_daemon" "kill pid=${pid}"
+        kill "${pid}" 2>/dev/null
+        if ! wait_for_process_stop 30 1; then
+            print_log "stop_daemon" "timeout, kill -9"
+            kill -9 "${pid}" 2>/dev/null
+        fi
+        cleanup_pid_file
+    elif find_process_by_binary; then
+        print_log "stop_daemon" "kill pid=${pid} (by cmdline)"
+        kill "${pid}" 2>/dev/null
+        if ! wait_for_process_stop 30 1; then
+            kill -9 "${pid}" 2>/dev/null
+        fi
+        cleanup_pid_file
+    else
+        print_log "stop_daemon" "no running process"
+    fi
+
+    if [ -n "${DSH_SOCK}" ]; then
+        rm -f "${DSH_SOCK}" 2>/dev/null
+    fi
+    return 0
+}
+
+# 检查应用状态
+status_daemon() {
+    if check_pid_file_valid; then
+        print_log "status_daemon" "running, pid=${pid}"
+        return 0
+    fi
+    if find_process_by_binary; then
+        print_log "status_daemon" "running (cmdline), pid=${pid}"
+        return 0
+    fi
+    print_log "status_daemon" "not running"
+    return 1
+}
