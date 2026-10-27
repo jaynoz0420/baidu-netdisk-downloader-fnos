@@ -214,6 +214,51 @@ Cookie 里必须包含 `BDUSS`，建议连 `STOKEN` 一起带上。Cookie 有时
 
 所以固定 1MB 分片，靠并发数提升总速率。
 
+### 扫码登录的三个坑
+
+百度的扫码登录流程有三个容易踩的地方，本项目都已踩过并修正：
+
+**1. 参数必须是 `tpl=mn`，不是 `netdisk`**
+
+```
+GET https://passport.baidu.com/v2/api/getqrcode
+    ?lp=pc&qrloginfrom=pc&tpl=mn&apiver=v3
+    &callback=tangram_guid_<ts>
+    &gid=00000000-0000-0000-0000-000000000000&tt=<ts>&_=<ts>
+```
+
+`callback` 是 JSONP 包装名，百度据此判断请求来自网页端。用 `tpl=netdisk`
+或不带 `callback` 时能拿到二维码，但**后续轮询永远收不到确认票据**。
+
+**2. 确认后的状态是 `status=0` + `v`，不是 `status=2`**
+
+轮询 `channel/unicast` 的返回：
+
+| 阶段 | channel_v 内容 |
+|---|---|
+| 未扫码 | `{"errno":1}` |
+| 已扫码待确认 | `{"status":1}` |
+| **用户已确认** | **`{"status":0,"v":"<32位票据>"}`** |
+
+所以判断依据应该是「**响应里有没有 `v`**」，而不是 status 等于几。
+
+**3. `v` 票据必须用 `qrbdusslogin` 兑换，且只有约 2 秒有效期**
+
+```
+GET https://passport.baidu.com/v3/login/main/qrbdusslogin
+    ?alg=v3&apiver=v3&bduss=<v票据>
+    &loginVersion=v4&qrcode=1&tpl=mn
+    &u=https%3A%2F%2Fwww.baidu.com%2F
+    &tt=<ts>&time=<ts>&v=<ts>&elapsed=1234
+    &callback=bd__cbs__odmford
+```
+
+成功时 `Set-Cookie` 会带 `BDUSS` + `STOKEN`。注意 `v` 票据放在 **`bduss` 参数**里
+（名字容易误解，它不是 BDUSS 本身）。
+
+另外，申请二维码 / 轮询 / 兑换这三步必须**共用同一个 cookie 会话**，
+否则百度不认为是同一次登录流程。
+
 ### 取链接时的 UA 必须一致
 
 `filemetas` 接口取 dlink 时用什么 UA，下载时就必须用同一个 UA，否则全部 403。
