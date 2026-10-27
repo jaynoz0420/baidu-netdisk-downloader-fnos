@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ============================================================
 APP_ID = "250528"
 APP_NAME = "百度网盘下载器"
-VERSION = "1.7.1"
+VERSION = "1.8.0"
 
 UA_PC = ("netdisk;P2SP;3.0.0.8;netdisk;11.12.0;PC;PC-Windows;10.0.19045;"
          "WindowsBaiduYunGuanJia")
@@ -604,24 +604,92 @@ def bd_walk(dirpath, max_files=5000, max_depth=12, _depth=0,
 # ------------------------------------------------------------
 #  扫码登录
 # ------------------------------------------------------------
+def _qr_strip_callback(text):
+    """去掉 JSONP 包装: tangram_guid_xxx({...})  ->  {...}"""
+    t = (text or "").strip()
+    m = re.match(r'^[\w$.]+\((.*)\)\s*;?\s*$', t, re.S)
+    if m:
+        return m.group(1)
+    return t
+
+
+def _qr_ts():
+    return int(time.time() * 1000)
+
+
+def _qr_make_session():
+    """为一次扫码登录创建独立的会话 (cookie jar + opener)
+
+    申请二维码、轮询状态、兑换 BDUSS 必须共用同一个会话,
+    否则百度不认这是同一个登录流程。
+    """
+    import http.cookiejar
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(jar),
+        urllib.request.HTTPSHandler(context=SSL_CTX))
+    return jar, opener
+
+
 def qr_new():
-    """申请二维码, 返回 qr_id / sign / 图片 base64"""
-    t = http_text("https://passport.baidu.com/v2/api/getqrcode"
-                  "?lp=pc&qrloginfrom=pc&gid=00000000-0000-0000-0000-000000000000",
-                  headers={"Referer": "https://pan.baidu.com/"}, timeout=20)
-    j = json.loads(t)
+    """申请二维码
+
+    关键参数 (实测必须):
+      - tpl=mn       而不是 netdisk
+      - apiver=v3
+      - callback=... JSONP 包装, 百度据此判断是网页端
+      - gid / tt / _
+    缺了 callback 时, 返回的是裸 JSON, 后续轮询拿不到确认票据。
+
+    另外: 申请二维码 / 轮询 / 兑换 三处必须共用同一个 cookie 会话。
+    """
+    cb = "tangram_guid_%d" % _qr_ts()
+    params = {
+        "lp": "pc",
+        "qrloginfrom": "pc",
+        "gid": "00000000-0000-0000-0000-000000000000",
+        "callback": cb,
+        "apiver": "v3",
+        "tt": str(_qr_ts()),
+        "tpl": "mn",
+        "_": str(_qr_ts()),
+    }
+    u = ("https://passport.baidu.com/v2/api/getqrcode?"
+         + urllib.parse.urlencode(params))
+
+    jar, opener = _qr_make_session()
+    try:
+        req = urllib.request.Request(u, headers={
+            "User-Agent": UA_BROWSER,
+            "Referer": "https://passport.baidu.com/v2/?login",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9"})
+        with opener.open(req, timeout=20) as r:
+            t = r.read().decode("utf-8", "replace")
+    except Exception as e:
+        raise RuntimeError("请求二维码失败: %s" % e)
+
+    j = json.loads(_qr_strip_callback(t))
     sign = j.get("sign", "")
     imgurl = j.get("imgurl", "")
     if not sign:
         raise RuntimeError("getqrcode 失败: %s" % t[:200])
     if not imgurl.startswith("http"):
         imgurl = "https://" + imgurl
-    img, _, _ = http_req(imgurl, headers={"User-Agent": UA_BROWSER},
-                         timeout=20)
+    try:
+        req2 = urllib.request.Request(imgurl, headers={
+            "User-Agent": UA_BROWSER,
+            "Referer": "https://passport.baidu.com/"})
+        with opener.open(req2, timeout=20) as r2:
+            img = r2.read()
+    except Exception:
+        img = b""
+
     qid = uuid.uuid4().hex
-    st = {"sign": sign, "created": now(), "status": 0,
+    st = {"sign": sign, "callback": cb, "created": now(), "status": 0,
           "msg": "请使用百度 App 扫码登录", "user": None,
-          "running": True, "stop": False}
+          "running": True, "stop": False,
+          "jar": jar, "opener": opener}
     STATE["qr"][qid] = st
     # 后台线程负责长轮询, 前端查询立即返回
     threading.Thread(target=_qr_worker, args=(qid, st), daemon=True).start()
@@ -632,18 +700,91 @@ def qr_new():
     }
 
 
+def _qr_bdusslogin(v_ticket, opener):
+    """用扫码票据兑换 BDUSS
+
+    百度真正的兑换接口是 /v3/login/main/qrbdusslogin,
+    把票据放在 bduss 参数里。成功后 Set-Cookie 里带 BDUSS / STOKEN。
+
+    实测: 直接请求即可拿到 cookie, sig/shaOne 缺失也能工作。
+    """
+    params = {
+        "alg": "v3",
+        "apiver": "v3",
+        "bduss": v_ticket,
+        "loginVersion": "v4",
+        "qrcode": "1",
+        "time": str(_qr_ts() // 1000),
+        "tpl": "mn",
+        "tt": str(_qr_ts()),
+        "u": "https%3A%2F%2Fwww.baidu.com%2F",
+        "elapsed": "1234",
+        "v": str(_qr_ts()),
+        "callback": "bd__cbs__odmford",
+    }
+    u = ("https://passport.baidu.com/v3/login/main/qrbdusslogin?"
+         + urllib.parse.urlencode(params))
+    try:
+        req = urllib.request.Request(u, headers={
+            "User-Agent": UA_BROWSER,
+            "Referer": "https://passport.baidu.com/v2/?login",
+            "Accept": "*/*",
+        })
+        with opener.open(req, timeout=25) as r:
+            body = r.read().decode("utf-8", "replace")
+            hdr = dict(r.headers)
+    except Exception as e:
+        log("qrbdusslogin 请求失败: %s" % e)
+        return "", ""
+
+    # 从响应 JSONP 里判断是否成功
+    try:
+        j = json.loads(_qr_strip_callback(body))
+        code = str(j.get("code", ""))
+        ei = j.get("errInfo") or {}
+        if code not in ("110000", "0"):
+            log("qrbdusslogin code=%s errInfo=%s" % (code, ei))
+        if ei.get("no") not in (None, "0", 0):
+            log("qrbdusslogin errInfo=%s" % ei)
+    except Exception:
+        pass
+
+    return body, hdr.get("Set-Cookie", "")
+
+
+def _qr_cookie_from_jar(jar):
+    """从 cookie jar 拼出 cookie 串 (BDUSS + STOKEN 必需)"""
+    want = ("BDUSS", "STOKEN", "PTOKEN", "UBI")
+    got = {}
+    for c in jar:
+        n = c.name.upper()
+        for w in want:
+            if n == w and w not in got:
+                got[w] = c.value
+    parts = []
+    if "BDUSS" in got:
+        parts.append("BDUSS=" + got["BDUSS"])
+    if "STOKEN" in got:
+        parts.append("STOKEN=" + got["STOKEN"])
+    if "PTOKEN" in got:
+        parts.append("PTOKEN=" + got["PTOKEN"])
+    if "UBI" in got:
+        parts.append("UBI=" + got["UBI"])
+    return "; ".join(parts), got
+
+
 def _qr_worker(qid, st):
     """后台长轮询百度通道, 把状态写进 st
 
-    注意: 百度通道在用户扫码后 (status=1) 会很快进入"等待确认",
-    此时需要继续紧密轮询才能及时拿到 status=2 和 v 票据.
-    用带 cookie 的 opener 保证会话连续性.
+    必须复用 qr_new() 里创建的会话 (jar + opener):
+    申请二维码 / 轮询 / 兑换 BDUSS 是同一个登录流程, 换会话会导致
+    百度不返回确认票据。
     """
-    import http.cookiejar
-    jar = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(
-        urllib.request.HTTPCookieProcessor(jar),
-        urllib.request.HTTPSHandler(context=SSL_CTX))
+    jar = st.get("jar")
+    opener = st.get("opener")
+    if jar is None or opener is None:
+        jar, opener = _qr_make_session()
+        st["jar"], st["opener"] = jar, opener
 
     deadline = now() + 300
     scanned = False
@@ -651,20 +792,28 @@ def _qr_worker(qid, st):
         if st.get("status") in (2, -1, -2):
             return
         try:
-            ts = str(int(now() * 1000))
+            # 关键: 轮询必须用与申请二维码一致的 tpl=mn + callback + apiver=v3,
+            # 否则百度返回的 channel_v 里没有确认票据 v
+            pp = {
+                "channel_id": st["sign"],
+                "tpl": "mn",
+                "gid": "00000000-0000-0000-0000-000000000000",
+                "callback": st.get("callback", ""),
+                "apiver": "v3",
+                "tt": str(_qr_ts()),
+                "_": str(_qr_ts()),
+            }
             u = ("https://passport.baidu.com/channel/unicast?"
-                 + urllib.parse.urlencode({
-                     "channel_id": st["sign"], "tpl": "netdisk", "lp": "pc",
-                     "v": ts, "gid": "00000000-0000-0000-0000-000000000000",
-                     "_": ts}))
+                 + urllib.parse.urlencode(pp))
             req = urllib.request.Request(u, headers={
                 "User-Agent": UA_BROWSER,
-                "Referer": "https://pan.baidu.com/"})
+                "Referer": "https://passport.baidu.com/v2/?login",
+                "Accept": "*/*"})
             # 已扫码后用短超时, 快速轮询; 未扫码用长超时
-            to = 12 if scanned else 45
+            to = 10 if scanned else 30
             with opener.open(req, timeout=to) as r:
                 t = r.read().decode("utf-8", "replace")
-            j = json.loads(t)
+            j = json.loads(_qr_strip_callback(t))
         except Exception:
             # 长轮询超时属正常
             continue
@@ -678,78 +827,86 @@ def _qr_worker(qid, st):
             continue
 
         s = inner.get("status")
+        v_ticket = inner.get("v") or ""
+
+        # 重要: 百度在「已扫码待确认」时返回 status=1,
+        # 而**用户点确认之后返回的是 status=0 + v 票据** (不是 status=2).
+        # 且 v 票据的有效窗口极短 (实测约 2 秒), 必须立刻兑换。
+        # 因此只要响应里带了 v, 就先尝试兑换 BDUSS, 不要被 status 值拦住。
         if s == 1:
             if not scanned:
                 log("qr 已扫码, 等待手机确认")
             scanned = True
             st["status"] = 1
             st["msg"] = "已扫码, 请在手机上确认"
-            continue
+            if not v_ticket:
+                continue
+            # status=1 但带 v: 也直接兑换
+            log("qr status=1 且带 v, 尝试兑换")
+
         if s in (3, 4, 5):
             st["status"] = -1
             st["msg"] = "已取消或过期, 请刷新二维码"
             return
-        if s != 2:
+
+        # 没有 v 且 status 不是 2 → 继续等
+        if not v_ticket and s != 2:
             continue
 
         # 记录原始 channel_v 便于排查
         st["raw_v"] = j.get("channel_v")
+        log("qr 收到票据 status=%r v=%r" % (s, str(v_ticket)[:80]))
 
-        # 已确认, 换 BDUSS
-        vurl = inner.get("v", "")
-        log("qr 确认, v=%r" % (vurl[:300] if isinstance(vurl, str) else vurl))
+        # === 兑换 BDUSS: 百度真正的接口是 /v3/login/main/qrbdusslogin ===
+        bduss = ""
+        stoken = ""
         try:
-            bduss = _qr_to_bduss(vurl)
+            body, setck = _qr_bdusslogin(v_ticket, opener)
+            cookiestr, got = _qr_cookie_from_jar(jar)
+            if got.get("BDUSS"):
+                bduss = got["BDUSS"]
+                stoken = got.get("STOKEN", "")
+                log("qrbdusslogin 成功, BDUSS 长度 %d, STOKEN %s"
+                    % (len(bduss), "有" if stoken else "无"))
         except Exception as e:
-            log("qr 换 bduss 异常: %s" % e)
-            bduss = ""
+            log("qrbdusslogin 异常: %s" % e)
 
-        # 若 v 只是短票据, 用 v2/api/qrcode 再换一次
-        if not bduss and isinstance(vurl, str) and vurl:
+        # 兜底: 从响应体里正则抓 BDUSS
+        if not bduss:
             try:
-                u2 = ("https://passport.baidu.com/v2/api/qrcode?"
-                      + urllib.parse.urlencode({
-                          "sign": st["sign"], "lp": "pc", "v": vurl,
-                          "_": str(int(now() * 1000))}))
-                req2 = urllib.request.Request(u2, headers={
-                    "User-Agent": UA_BROWSER,
-                    "Referer": "https://pan.baidu.com/"})
-                with opener.open(req2, timeout=25) as r2:
-                    b2 = r2.read().decode("utf-8", "replace")
-                log("v2/api/qrcode 返回: %r" % b2[:300])
                 m = re.search(r"[Bb][Dd][Uu][Ss][Ss]=([A-Za-z0-9_%+/=\-]{20,400})",
-                              b2)
+                              body if "body" in dir() else "")
                 if m:
                     bduss = m.group(1)
-            except Exception as e:
-                log("v2/api/qrcode 失败: %s" % e)
-
-        # 最后尝试: 直接从 cookie jar 取
-        if not bduss:
-            for ck in jar:
-                if ck.name.upper() == "BDUSS" and len(ck.value) >= 20:
-                    bduss = ck.value
-                    log("从 cookie jar 取到 BDUSS")
-                    break
+                    log("从响应体正则取到 BDUSS")
+            except Exception:
+                pass
 
         if not bduss:
-            log("qr 未取得 bduss, v=%r, jar=%r"
-                % (vurl[:200] if vurl else "",
+            log("qr 未取得 bduss, status=%r v=%r, jar=%r"
+                % (s, str(v_ticket)[:60],
                    [(c.name, c.value[:20]) for c in jar]))
             st["status"] = -2
-            st["msg"] = "未取得 BDUSS (v=%s)" % (
-                (vurl[:60] + "...") if isinstance(vurl, str) and len(vurl) > 60
-                else (vurl or "(空)"))
+            st["msg"] = "未取得 BDUSS, 请重试"
             return
-        log("qr 取得 bduss, 长度 %d" % len(bduss))
 
-        STATE["config"]["cookie"] = "BDUSS=%s" % bduss
+        # 组装完整 cookie (BDUSS + STOKEN 都需要)
+        ck = "BDUSS=" + bduss
+        if stoken:
+            ck += "; STOKEN=" + stoken
+        STATE["config"]["cookie"] = ck
         STATE["config"]["bdstoken"] = ""
         save_config()
+
         try:
             info = bd_userinfo()
         except Exception:
             info = {}
+        if not info.get("uk"):
+            log("扫码后 uinfo 校验失败, 但仍保存 cookie")
+        else:
+            log("扫码登录成功: %s (uk=%s)"
+                % (info.get("name") or "(无昵称)", info.get("uk")))
         st["user"] = info
         st["status"] = 2
         st["msg"] = "登录成功"
@@ -778,81 +935,6 @@ def qr_poll(qid):
             STATE["qr"].pop(qid, None)
         threading.Thread(target=_cleanup, daemon=True).start()
     return r
-
-
-def _qr_to_bduss(vurl):
-    """从扫码确认返回的 v 里提取 BDUSS
-
-    v 的可能形态 (按百度实际返回):
-      1. "BDUSS=xxx"                     直接带 cookie 名
-      2. "https://passport.baidu.com/...?bduss=xxx"   小写 bduss 参数
-      3. "https://passport.baidu.com/...?BDUSS=xxx"   大写参数
-      4. 纯 bduss 串 (40~300 位 base64 风格)
-      5. 一个需要访问的跳转 URL, 通过 Set-Cookie 或页面里的 BDUSS 取值
-    """
-    if not vurl or not isinstance(vurl, str):
-        return ""
-
-    v = vurl.strip()
-
-    # --- 1. 先做 URL 解码, 处理 %3D 之类 ---
-    try:
-        v_dec = urllib.parse.unquote(v)
-    except Exception:
-        v_dec = v
-
-    # --- 2. 直接匹配 BDUSS= / bduss= (大小写不敏感) ---
-    for src in (v, v_dec):
-        m = re.search(r"[Bb][Dd][Uu][Ss][Ss]=([A-Za-z0-9_%+/=\-]{20,400})", src)
-        if m:
-            val = m.group(1)
-            try:
-                val = urllib.parse.unquote(val)
-            except Exception:
-                pass
-            if len(val) >= 20:
-                return val
-
-    # --- 3. 从 URL 的 query 参数里找 bduss / BDUSS ---
-    if "?" in v_dec:
-        try:
-            q = urllib.parse.urlparse(v_dec).query
-            params = urllib.parse.parse_qs(q, keep_blank_values=True)
-            for key in ("bduss", "BDUSS", "Bduss"):
-                if key in params and params[key]:
-                    val = params[key][0]
-                    if 20 <= len(val) <= 400:
-                        return val
-        except Exception:
-            pass
-
-    # --- 4. 纯 bduss 串 ---
-    if re.fullmatch(r"[A-Za-z0-9_%+/=\-]{20,400}", v_dec):
-        return v_dec
-
-    # --- 5. 是 URL, 访问它取 Set-Cookie / 页面内容 ---
-    target = v_dec if v_dec.startswith("http") else v
-    if target.startswith("http"):
-        try:
-            body, hdr, _ = http_req(target,
-                                    headers={"User-Agent": UA_BROWSER},
-                                    timeout=25)
-            # Set-Cookie
-            for k, hv in hdr.items():
-                if k.lower() == "set-cookie":
-                    m = re.search(r"[Bb][Dd][Uu][Ss][Ss]=([^;,\s]+)",
-                                  hv if isinstance(hv, str) else str(hv))
-                    if m and len(m.group(1)) >= 20:
-                        return m.group(1)
-            # 页面/跳转内容
-            m = re.search(rb"[Bb][Dd][Uu][Ss][Ss]=([A-Za-z0-9_%+/=\-]{20,400})",
-                          body)
-            if m:
-                return m.group(1).decode("utf-8", "replace")
-        except Exception as e:
-            log("qr 访问 v 失败: %s" % e)
-
-    return ""
 
 
 def cookie_login(cookie_text):
