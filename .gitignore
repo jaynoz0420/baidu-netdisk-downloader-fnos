@@ -14,10 +14,3 @@ publish.py
 push_existing.py
 publish2.py
 publish3.py
-cleanup_repo.py
-publish.py
-publish2.py
-push_existing.py
-upload_workflow.py
-verify_final.py
-final_verify2.py
