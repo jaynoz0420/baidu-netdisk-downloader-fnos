@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ============================================================
 APP_ID = "250528"
 APP_NAME = "百度网盘下载器"
-VERSION = "1.8.1"
+VERSION = "1.9.0"
 
 UA_PC = ("netdisk;P2SP;3.0.0.8;netdisk;11.12.0;PC;PC-Windows;10.0.19045;"
          "WindowsBaiduYunGuanJia")
@@ -271,6 +271,61 @@ def bd_userinfo():
     save_config()
     return {"uk": c.get("uk", ""), "name": c.get("user_name", ""),
             "errno": j.get("errno", -1)}
+
+
+def bd_quota():
+    """查询网盘容量与会员信息 (用于侧边栏容量条)
+
+    注意: 这个接口必须用网盘客户端 UA (UA_PC), 用浏览器 UA 会返回 400。
+    """
+    tok = bd_bdstoken()
+    out = {"errno": 0, "total": 0, "used": 0, "free": 0,
+           "total_h": "", "used_h": "", "free_h": "", "percent": 0,
+           "vip": "", "is_vip": False, "avatar": ""}
+    # 容量
+    try:
+        u = ("https://pan.baidu.com/api/quota?"
+             + urllib.parse.urlencode({
+                 "checkfree": "1", "checkexpire": "1",
+                 "bdstoken": tok, "app_id": APP_ID, "web": "1"}))
+        t = http_text(u, headers=bd_headers(UA_PC), timeout=20)
+        j = json.loads(t)
+        if j.get("errno") == 0:
+            total = int(j.get("total") or 0)
+            used = int(j.get("used") or 0)
+            free = int(j.get("free") or 0) or max(0, total - used)
+            out["total"] = total
+            out["used"] = used
+            out["free"] = free
+            out["total_h"] = fmt_size(total)
+            out["used_h"] = fmt_size(used)
+            out["free_h"] = fmt_size(free)
+            out["percent"] = round(used * 100.0 / total, 1) if total else 0
+    except Exception as e:
+        log("quota 失败: %s" % e)
+
+    # 用户 / 会员信息
+    try:
+        u2 = ("https://pan.baidu.com/rest/2.0/xpan/nas?method=uinfo"
+              "&clienttype=0&app_id=%s" % APP_ID)
+        t2 = http_text(u2, headers=bd_headers(UA_PC), timeout=15)
+        j2 = json.loads(t2)
+        if j2.get("errno") == 0:
+            out["avatar"] = j2.get("avatar_url") or ""
+            nm = j2.get("baidu_name") or j2.get("netdisk_name") or ""
+            if nm and not STATE["config"].get("user_name"):
+                STATE["config"]["user_name"] = nm
+                save_config()
+            vt = str(j2.get("vip_type") or "")
+            if vt == "2":
+                out["vip"] = "超级会员"
+                out["is_vip"] = True
+            elif vt == "1":
+                out["vip"] = "会员"
+                out["is_vip"] = True
+    except Exception:
+        pass
+    return out
 
 
 def bd_list(dirpath, order="time", desc=True):
@@ -1753,6 +1808,9 @@ class Handler(BaseHTTPRequestHandler):
                     "conns": c.get("conns", DEFAULT_CONNS),
                     "version": VERSION,
                 })
+
+            if path == "/api/quota":
+                return self._json(bd_quota())
 
             if path == "/api/qr/new":
                 return self._json(qr_new())
