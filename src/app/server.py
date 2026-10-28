@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ============================================================
 APP_ID = "250528"
 APP_NAME = "百度网盘下载器"
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 UA_PC = ("netdisk;P2SP;3.0.0.8;netdisk;11.12.0;PC;PC-Windows;10.0.19045;"
          "WindowsBaiduYunGuanJia")
@@ -114,6 +114,32 @@ def fmt_size(n):
         if n < 1024 or u == "TB":
             return ("%.0f %s" % (n, u)) if u == "B" else ("%.2f %s" % (n, u))
         n /= 1024.0
+
+
+def fmt_eta(seconds):
+    """把剩余秒数格式化成易读文本
+
+    1 分钟以内精确到秒, 1 小时以内精确到分, 再长就到小时/天。
+    """
+    try:
+        s = int(seconds)
+    except Exception:
+        return ""
+    if s <= 0:
+        return ""
+    if s < 60:
+        return "%d 秒" % s
+    if s < 3600:
+        m = s // 60
+        r = s % 60
+        return "%d 分 %d 秒" % (m, r) if m < 10 else "%d 分" % m
+    if s < 86400:
+        h = s // 3600
+        m = (s % 3600) // 60
+        return "%d 小时 %d 分" % (h, m) if h < 10 else "%d 小时" % h
+    d = s // 86400
+    h = (s % 86400) // 3600
+    return "%d 天 %d 小时" % (d, h) if d < 10 else "%d 天" % d
 
 
 # ============================================================
@@ -1186,6 +1212,37 @@ class Task(object):
     # --- 序列化 ---
     def to_dict(self):
         prog = (self.bytes_done / self.size * 100) if self.size else 0
+
+        # 剩余时间估算
+        # 用「已下载字节 / 已耗时」算平均速度, 比瞬时速度稳定,
+        # 避免因为网络抖动导致剩余时间来回跳。
+        remain = max(0, self.size - self.bytes_done)
+        eta = 0
+        eta_h = ""
+        elapsed = (self.finished or now()) - self.started if self.started else 0
+        if self.state == "done":
+            eta = 0
+            eta_h = "已完成"
+        elif self.state in ("running", "pending") and remain > 0:
+            avg = 0.0
+            if elapsed > 1 and self.bytes_done > 0:
+                avg = self.bytes_done / elapsed          # bytes/s
+            # 平均速度还没建立起来时, 退回瞬时速度
+            if avg <= 0 and self.speed > 0:
+                avg = self.speed * 1048576
+            if avg > 0:
+                eta = int(remain / avg)
+                eta_h = fmt_eta(eta)
+            else:
+                eta = 0
+                eta_h = "计算中…"
+        elif self.state == "paused":
+            eta_h = "已暂停"
+        elif self.state == "error":
+            eta_h = "已中断"
+        else:
+            eta_h = ""
+
         return {
             "id": self.id,
             "fs_id": self.fs_id,
@@ -1198,14 +1255,16 @@ class Task(object):
             "msg": self.msg,
             "progress": round(prog, 2),
             "bytes_done_h": fmt_size(self.bytes_done),
+            "bytes_remain_h": fmt_size(remain),
             "speed": round(self.speed, 2),
             "speed_h": "%.2f MB/s" % self.speed,
+            "eta": eta,
+            "eta_h": eta_h,
             "nchunks": self.nchunks,
             "done_chunks": len(self.done),
             "conns": self.conns,
             "created": self.created,
-            "elapsed": int((self.finished or now()) - self.started)
-            if self.started else 0,
+            "elapsed": int(elapsed) if self.started else 0,
         }
 
     # --- 断点 ---
