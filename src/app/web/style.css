@@ -184,6 +184,11 @@ textarea:focus, input:focus { outline: none; border-color: var(--primary); }
 }
 .speed-detail span { white-space: nowrap; }
 .speed-detail span b { color: var(--text); font-weight: 500; }
+/* 总剩余时间: 用主题色突出 */
+.speed-detail .speed-eta { color: var(--primary); }
+.speed-detail .speed-eta b { color: var(--primary); font-weight: 600; }
+/* 单个任务的剩余时间 */
+.task-meta .eta { color: var(--primary); font-weight: 500; }
 .speed-spark {
   flex: 1; min-width: 80px; height: 30px;
   display: flex; align-items: flex-end; gap: 2px;
