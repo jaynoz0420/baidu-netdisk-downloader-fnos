@@ -311,10 +311,27 @@
     return (i === 0 ? Math.round(n) : n.toFixed(2)) + " " + u[i];
   }
 
+  /** 把秒数格式化成「1 小时 30 分」这类文本 */
+  function fmtDuration(sec) {
+    var s = Math.max(0, Math.floor(sec || 0));
+    if (s < 60) return s + " 秒";
+    if (s < 3600) {
+      var m = Math.floor(s / 60), r = s % 60;
+      return m < 10 ? (m + " 分 " + r + " 秒") : (m + " 分");
+    }
+    if (s < 86400) {
+      var h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60);
+      return h < 10 ? (h + " 小时 " + mm + " 分") : (h + " 小时");
+    }
+    var d = Math.floor(s / 86400), hh = Math.floor((s % 86400) / 3600);
+    return d < 10 ? (d + " 天 " + hh + " 小时") : (d + " 天");
+  }
+
   function renderSpeedPanel() {
     var run = [], queued = 0, done = 0, paused = 0, errs = 0;
     var totalSpeed = 0;
     var totalBytes = 0;
+    var runRemain = 0;      // 运行中任务的剩余字节合计
 
     lastTasks.forEach(function (t) {
       var sp = t.speed || 0;
@@ -328,7 +345,9 @@
       if (t.state === "done") {
         totalBytes += t.size || 0;
       } else if (t.done_chunks && t.nchunks && t.size) {
-        totalBytes += Math.round(t.size * t.done_chunks / t.nchunks);
+        var got = Math.round(t.size * t.done_chunks / t.nchunks);
+        totalBytes += got;
+        if (t.state === "running") runRemain += Math.max(0, t.size - got);
       }
     });
 
@@ -350,7 +369,21 @@
       } else {
         pEl.innerHTML = "已暂停 <b>" + paused + "</b>";
       }
-      $("speedTotalBytes").innerHTML = "已下载 <b>" + fmtBytes(totalBytes) + "</b>";
+      $("speedTotalBytes").innerHTML =
+        "已下载 <b>" + fmtBytes(totalBytes) + "</b>";
+
+      // 总剩余时间 (仅当有任务在跑且速度已知)
+      var etaEl = $("speedEta");
+      if (etaEl) {
+        if (run.length && totalSpeed > 0.01 && runRemain > 0) {
+          var etaSec = Math.round(runRemain / (totalSpeed * 1048576));
+          etaEl.innerHTML = "剩余 <b>" + fmtDuration(etaSec) + "</b>";
+        } else if (run.length) {
+          etaEl.innerHTML = "剩余 <b>计算中…</b>";
+        } else {
+          etaEl.innerHTML = "";
+        }
+      }
     }
 
     // 速度曲线
@@ -406,9 +439,15 @@
       h += '<div class="task-meta">';
       h += '<span>' + t.progress + '%</span>';
       h += '<span>' + esc(t.bytes_done_h) + ' / ' + esc(t.size_h) + '</span>';
-      if (t.state === "running") h += '<span>' + esc(t.speed_h) + '</span>';
+      if (t.state === "running") {
+        h += '<span>' + esc(t.speed_h) + '</span>';
+        // 剩余时间
+        if (t.eta_h) {
+          h += '<span class="eta">剩余 ' + esc(t.eta_h) + '</span>';
+        }
+      }
       h += '<span>' + t.done_chunks + '/' + t.nchunks + ' 片</span>';
-      if (t.elapsed) h += '<span>' + t.elapsed + ' 秒</span>';
+      if (t.elapsed) h += '<span>已用 ' + fmtDuration(t.elapsed) + '</span>';
       if (t.msg) h += '<span>' + esc(t.msg) + '</span>';
       h += '</div>';
       h += '<div class="task-acts">';
