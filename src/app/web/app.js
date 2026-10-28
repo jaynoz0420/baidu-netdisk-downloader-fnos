@@ -64,7 +64,7 @@
       var el = $("view" + v.charAt(0).toUpperCase() + v.slice(1));
       if (el) el.style.display = (v === name) ? "" : "none";
     });
-    document.querySelectorAll(".main-tabs .tab").forEach(function (t) {
+    document.querySelectorAll(".side-nav .nav-item").forEach(function (t) {
       t.classList.toggle("active", t.dataset.view === name);
     });
     if (name === "tasks") loadTasks();
@@ -79,10 +79,15 @@
         $("loginView").style.display = "none";
         $("mainView").style.display = "";
         $("btnLogout").style.display = "";
-        $("userInfo").textContent = s.name || s.uk || "已登录";
+        var nm = s.name || s.uk || "已登录";
+        $("userInfo").textContent = nm;
+        // 头像用昵称首字
+        var av = $("userAvatar");
+        if (av) av.textContent = nm.charAt(0) || "百";
         $("verBadge").textContent = "v" + s.version;
         if (!cloudPath) cloudPath = "/";
         loadCloud(cloudPath);
+        loadQuota();
       } else {
         $("loginView").style.display = "";
         $("mainView").style.display = "none";
@@ -95,8 +100,43 @@
     });
   }
 
-  function startQr() {
-    stopQr();
+  /* ---------------- 容量信息 ---------------- */
+  function loadQuota() {
+    api("/api/quota").then(function (q) {
+      var fill = $("quotaFill");
+      var txt = $("quotaText");
+      if (!fill || !txt) return;
+      if (!q || !q.total) {
+        fill.style.width = "0%";
+        txt.textContent = "容量获取失败";
+        return;
+      }
+      var pct = Math.min(100, q.percent || 0);
+      fill.style.width = pct + "%";
+      // 剩余空间紧张时变成警示色
+      if (pct >= 90) {
+        fill.style.background = "linear-gradient(90deg,#f5a623,#f04a45)";
+      } else {
+        fill.style.background = "linear-gradient(90deg,#4d9bff,#2b6ef2)";
+      }
+      txt.textContent = q.used_h + " / " + q.total_h + " 已用";
+      txt.title = "已用 " + q.used_h + "，共 " + q.total_h
+        + "，剩余 " + (q.total_h ? fmtBytes(q.free) : "—");
+
+      // 会员标签
+      var vipTags = document.querySelectorAll(".vip-tag");
+      if (vipTags.length) {
+        if (q.is_vip && q.vip) {
+          vipTags[0].textContent = q.vip;
+          vipTags[0].style.display = "";
+        } else {
+          vipTags[0].textContent = "普通用户";
+        }
+      }
+    }).catch(function () {});
+  }
+
+  function startQr() {    stopQr();
     qrId = null;
     $("qrMask").textContent = "加载中…";
     $("qrMask").classList.remove("hide");
@@ -154,6 +194,7 @@
   /* ---------------- 网盘文件 ---------------- */
   var sortState = { order: "time", desc: true };
   var selected = {};          // fs_id -> item
+  var cloudList = [];         // 当前目录的完整列表 (供搜索过滤)
 
   function selectedCount() {
     return Object.keys(selected).length;
@@ -163,12 +204,20 @@
     var n = selectedCount();
     $("batchBar").style.display = n > 0 ? "" : "none";
     $("selInfo").textContent = "已选 " + n + " 项";
+    // 顶部按钮: 有选中时才显示
+    var top = $("btnBatchDownload");
+    if (top) top.style.display = n > 0 ? "" : "none";
     var all = $("chkAllHead");
     if (all) all.checked = false;
   }
 
   function loadCloud(dir) {
-    $("cloudPath").textContent = dir;
+    // 面包屑: 根目录显示「我的文件」
+    var el = $("cloudPath");
+    if (el) {
+      el.textContent = (dir === "/" || !dir) ? "我的文件" : dir;
+      el.title = dir;
+    }
     selected = {};
     updateBatchBar();
     var tb = $("cloudBody");
@@ -179,108 +228,122 @@
       + "&desc=" + (sortState.desc ? "1" : "0");
 
     api(url).then(function (r) {
-      var list = r.list || [];
-      if (!list.length) {
-        tb.innerHTML = '<tr><td colspan="5" class="empty">空目录</td></tr>';
-        return;
-      }
-      var h = "";
-      list.forEach(function (it, i) {
-        h += '<tr data-fsid="' + esc(it.fs_id) + '">';
-        h += '<td class="col-chk"><input type="checkbox" class="row-chk" data-idx="' + i + '"></td>';
-        h += '<td><div class="name-cell" data-idx="' + i + '">'
-          + '<span class="ico">' + fileIcon(it) + '</span>'
-          + '<span>' + esc(it.name) + '</span>'
-          + (it.isdir ? '<span class="dir-tag">文件夹</span>' : '')
-          + '</div></td>';
-        h += '<td class="col-size">' + (it.isdir ? "-" : esc(it.size_h)) + '</td>';
-        h += '<td class="col-time">' + esc(it.mtime_h) + '</td>';
-        h += '<td class="col-act">'
-          + '<button class="btn primary sm dl-btn" data-idx="' + i + '">下载</button>'
-          + '</td>';
-        h += '</tr>';
-      });
-      tb.innerHTML = h;
-
-      // 点击名称: 文件夹进入, 文件不响应
-      tb.querySelectorAll(".name-cell").forEach(function (el) {
-        el.onclick = function () {
-          var it = list[+el.dataset.idx];
-          if (it.isdir) {
-            cloudPath = it.path;
-            loadCloud(it.path);
-          }
-        };
-      });
-
-      // 单行下载: 先弹窗选目录, 确认后再下载
-      tb.querySelectorAll(".dl-btn").forEach(function (el) {
-        el.onclick = function () {
-          var it = list[+el.dataset.idx];
-          var kind = it.isdir ? "文件夹" : "文件";
-          askDownloadDir("下载 " + kind + ": " + it.name, function (dir) {
-            el.disabled = true;
-            el.textContent = "…";
-            if (it.isdir) {
-              // 文件夹: 走批量接口 (会自动展开)
-              var body = {
-                items: [{ fs_id: it.fs_id, name: it.name,
-                          path: it.path, isdir: true }],
-                out_dir: dir
-              };
-              api("/api/download/batch", { method: "POST", body: body })
-                .then(function (res) {
-                  toast("已加入 " + res.created + " 个文件 (" + it.name + ")", 3000);
-                  $("taskDot").classList.add("show");
-                  el.textContent = "已加入";
-                  setTimeout(function () {
-                    el.disabled = false; el.textContent = "下载";
-                  }, 2500);
-                }).catch(function (e) {
-                  toast("失败: " + e.message, 3000);
-                  el.disabled = false; el.textContent = "下载";
-                });
-            } else {
-              api("/api/download", {
-                method: "POST",
-                body: { fs_id: it.fs_id, name: it.name, path: it.path,
-                        size: it.size, out_dir: dir }
-              })
-                .then(function () {
-                  toast("已加入下载: " + it.name);
-                  el.textContent = "已加入";
-                  $("taskDot").classList.add("show");
-                  setTimeout(function () {
-                    el.disabled = false; el.textContent = "下载";
-                  }, 2000);
-                }).catch(function (e) {
-                  toast("失败: " + e.message, 3000);
-                  el.disabled = false; el.textContent = "下载";
-                });
-            }
-          });
-        };
-      });
-
-      // 勾选
-      tb.querySelectorAll(".row-chk").forEach(function (cb) {
-        cb.onchange = function () {
-          var it = list[+cb.dataset.idx];
-          var tr = cb.closest("tr");
-          if (cb.checked) {
-            selected[it.fs_id] = it;
-            tr.classList.add("selected");
-          } else {
-            delete selected[it.fs_id];
-            tr.classList.remove("selected");
-          }
-          updateBatchBar();
-        };
-      });
-
+      cloudList = r.list || [];
+      renderCloud();
     }).catch(function (e) {
       tb.innerHTML = '<tr><td colspan="5" class="empty">加载失败: '
         + esc(e.message) + '</td></tr>';
+    });
+  }
+
+  /** 渲染网盘文件列表 (支持搜索过滤) */
+  function renderCloud() {
+    var tb = $("cloudBody");
+    var kw = ($("cloudSearch") ? $("cloudSearch").value : "").trim().toLowerCase();
+    var list = cloudList;
+    if (kw) {
+      list = cloudList.filter(function (x) {
+        return (x.name || "").toLowerCase().indexOf(kw) >= 0;
+      });
+    }
+    if (!list.length) {
+      tb.innerHTML = '<tr><td colspan="5" class="empty">'
+        + (kw ? "没有匹配的文件" : "空目录") + '</td></tr>';
+      return;
+    }
+    var h = "";
+    list.forEach(function (it, i) {
+      h += '<tr data-fsid="' + esc(it.fs_id) + '">';
+      h += '<td class="col-chk"><input type="checkbox" class="row-chk" data-idx="' + i + '"></td>';
+      h += '<td class="col-name"><div class="name-cell" data-idx="' + i + '">'
+        + '<span class="ico">' + fileIcon(it) + '</span>'
+        + '<span class="fname" title="' + esc(it.name) + '">'
+        + esc(it.name) + '</span>'
+        + (it.isdir ? '<span class="dir-tag">文件夹</span>' : '')
+        + '</div></td>';
+      h += '<td class="col-size">' + (it.isdir ? "—" : esc(it.size_h)) + '</td>';
+      h += '<td class="col-time">' + esc(it.mtime_h) + '</td>';
+      h += '<td class="col-act">'
+        + '<button class="row-act dl-btn" data-idx="' + i + '">下载</button>'
+        + '</td>';
+      h += '</tr>';
+    });
+    tb.innerHTML = h;
+
+    // 点击名称: 文件夹进入, 文件不响应
+    tb.querySelectorAll(".name-cell").forEach(function (el) {
+      el.onclick = function () {
+        var it = list[+el.dataset.idx];
+        if (it.isdir) {
+          cloudPath = it.path;
+          loadCloud(it.path);
+        }
+      };
+    });
+
+    // 单行下载: 先弹窗选目录, 确认后再下载
+    tb.querySelectorAll(".dl-btn").forEach(function (el) {
+      el.onclick = function () {
+        var it = list[+el.dataset.idx];
+        var kind = it.isdir ? "文件夹" : "文件";
+        askDownloadDir("下载 " + kind + ": " + it.name, function (dir) {
+          el.disabled = true;
+          el.textContent = "…";
+          if (it.isdir) {
+            // 文件夹: 走批量接口 (会自动展开)
+            var body = {
+              items: [{ fs_id: it.fs_id, name: it.name,
+                        path: it.path, isdir: true }],
+              out_dir: dir
+            };
+            api("/api/download/batch", { method: "POST", body: body })
+              .then(function (res) {
+                toast("已加入 " + res.created + " 个文件 (" + it.name + ")", 3000);
+                $("taskDot").classList.add("show");
+                el.textContent = "已加入";
+                setTimeout(function () {
+                  el.disabled = false; el.textContent = "下载";
+                }, 2500);
+              }).catch(function (e) {
+                toast("失败: " + e.message, 3000);
+                el.disabled = false; el.textContent = "下载";
+              });
+          } else {
+            api("/api/download", {
+              method: "POST",
+              body: { fs_id: it.fs_id, name: it.name, path: it.path,
+                      size: it.size, out_dir: dir }
+            })
+              .then(function () {
+                toast("已加入下载: " + it.name);
+                el.textContent = "已加入";
+                $("taskDot").classList.add("show");
+                setTimeout(function () {
+                  el.disabled = false; el.textContent = "下载";
+                }, 2000);
+              }).catch(function (e) {
+                toast("失败: " + e.message, 3000);
+                el.disabled = false; el.textContent = "下载";
+              });
+          }
+        });
+      };
+    });
+
+    // 勾选
+    tb.querySelectorAll(".row-chk").forEach(function (cb) {
+      cb.onchange = function () {
+        var it = list[+cb.dataset.idx];
+        var tr = cb.closest("tr");
+        if (cb.checked) {
+          selected[it.fs_id] = it;
+          tr.classList.add("selected");
+        } else {
+          delete selected[it.fs_id];
+          tr.classList.remove("selected");
+        }
+        updateBatchBar();
+      };
     });
   }
 
@@ -410,10 +473,15 @@
     if ($("taskSummary")) $("taskSummary").textContent = lastTasks.length ? sum : "";
   }
 
+  var STATE_LABEL = {
+    pending: "等待中", queued: "排队中", running: "下载中",
+    paused: "已暂停", done: "已完成", error: "出错"
+  };
+
   function renderTasks() {
     var box = $("taskList");
     if (!lastTasks.length) {
-      box.innerHTML = '<div class="empty">暂无任务</div>';
+      box.innerHTML = '<tr><td colspan="7" class="empty">暂无任务</td></tr>';
       taskSel = {};
       updateTaskSelBar();
       return;
@@ -421,44 +489,72 @@
     var h = "";
     lastTasks.forEach(function (t) {
       var cls = t.state;
-      var label = {
-        pending: "等待中", queued: "排队中", running: "下载中",
-        paused: "已暂停", done: "已完成", error: "出错"
-      }[t.state] || t.state;
-      var barCls = t.state === "done" ? "done" : (t.state === "error" ? "error" : "");
+      var label = STATE_LABEL[t.state] || t.state;
+      var barCls = t.state === "done" ? "done"
+        : (t.state === "error" ? "error" : "");
       var checked = taskSel[t.id] ? " checked" : "";
-      var selCls = taskSel[t.id] ? " task-item-sel" : "";
-      h += '<div class="task-item' + selCls + '">';
-      h += '<div class="task-head">';
-      h += '<input type="checkbox" class="task-chk" data-id="' + t.id + '"' + checked + '>';
-      h += '<div class="task-name">' + esc(t.name) + '</div>';
-      h += '<span class="task-tag ' + cls + '">' + label + '</span>';
-      h += '</div>';
-      h += '<div class="bar"><div class="bar-inner ' + barCls
-        + '" style="width:' + Math.min(100, t.progress) + '%"></div></div>';
-      h += '<div class="task-meta">';
+      var selCls = taskSel[t.id] ? " selected" : "";
+
+      h += '<tr data-id="' + t.id + '" class="' + selCls.trim() + '">';
+      // 勾选
+      h += '<td class="col-chk">'
+        + '<input type="checkbox" class="task-chk" data-id="' + t.id + '"'
+        + checked + '></td>';
+
+      // 文件名 + 进度条 + 明细
+      h += '<td class="col-name"><div class="task-name">'
+        + '<span class="tn-text" title="' + esc(t.name) + '">'
+        + esc(t.name) + '</span></div>';
+      h += '<div class="progress-line"><i class="' + barCls
+        + '" style="width:' + Math.min(100, t.progress) + '%"></i></div>';
+      h += '<div class="task-sub">';
       h += '<span>' + t.progress + '%</span>';
       h += '<span>' + esc(t.bytes_done_h) + ' / ' + esc(t.size_h) + '</span>';
-      if (t.state === "running") {
-        h += '<span>' + esc(t.speed_h) + '</span>';
-        // 剩余时间
-        if (t.eta_h) {
-          h += '<span class="eta">剩余 ' + esc(t.eta_h) + '</span>';
-        }
-      }
-      h += '<span>' + t.done_chunks + '/' + t.nchunks + ' 片</span>';
       if (t.elapsed) h += '<span>已用 ' + fmtDuration(t.elapsed) + '</span>';
       if (t.msg) h += '<span>' + esc(t.msg) + '</span>';
-      h += '</div>';
-      h += '<div class="task-acts">';
-      if (t.state === "running" || t.state === "queued") {
-        h += '<button class="btn ghost sm" data-act="pause" data-id="' + t.id + '">暂停</button>';
-      } else if (t.state === "paused" || t.state === "error") {
-        h += '<button class="btn primary sm" data-act="resume" data-id="' + t.id + '">继续</button>';
+      h += '</div></td>';
+
+      // 大小
+      h += '<td class="col-size">' + esc(t.size_h) + '</td>';
+
+      // 速度
+      h += '<td class="col-speed">'
+        + (t.state === "running"
+            ? '<span style="color:var(--primary)">' + esc(t.speed_h) + '</span>'
+            : '<span style="color:var(--text-3)">—</span>')
+        + '</td>';
+
+      // 剩余时间
+      var eta = "";
+      if (t.state === "running" && t.eta_h) {
+        eta = '<span class="eta-hi">' + esc(t.eta_h) + '</span>';
+      } else if (t.state === "queued") {
+        eta = '<span style="color:var(--text-3)">排队中</span>';
+      } else if (t.state === "paused") {
+        eta = '<span style="color:var(--text-3)">已暂停</span>';
+      } else if (t.state === "done") {
+        eta = '<span style="color:var(--text-3)">已完成</span>';
+      } else if (t.state === "error") {
+        eta = '<span style="color:var(--text-3)">已中断</span>';
+      } else {
+        eta = '<span style="color:var(--text-3)">—</span>';
       }
-      h += '<button class="btn ghost sm" data-act="delete" data-id="' + t.id + '">删除</button>';
-      h += '</div>';
-      h += '</div>';
+      h += '<td class="col-eta">' + eta + '</td>';
+
+      // 状态
+      h += '<td class="col-state"><span class="state-tag ' + cls + '">'
+        + label + '</span></td>';
+
+      // 操作
+      h += '<td class="col-act">';
+      if (t.state === "running" || t.state === "queued") {
+        h += '<button class="row-act" data-act="pause" data-id="' + t.id + '">暂停</button>';
+      } else if (t.state === "paused" || t.state === "error") {
+        h += '<button class="row-act" data-act="resume" data-id="' + t.id + '">继续</button>';
+      }
+      h += '<button class="row-act" data-act="delete" data-id="' + t.id + '">删除</button>';
+      h += '</td>';
+      h += '</tr>';
     });
     box.innerHTML = h;
 
@@ -467,8 +563,8 @@
       cb.onchange = function () {
         if (cb.checked) taskSel[cb.dataset.id] = true;
         else delete taskSel[cb.dataset.id];
-        var item = cb.closest(".task-item");
-        if (item) item.classList.toggle("task-item-sel", cb.checked);
+        var tr = cb.closest("tr");
+        if (tr) tr.classList.toggle("selected", cb.checked);
         updateTaskSelBar();
       };
     });
@@ -539,10 +635,13 @@
       var h = "";
       items.forEach(function (it, i) {
         h += '<tr>';
-        h += '<td><div class="name-cell" data-idx="' + i + '">'
+        h += '<td class="col-name"><div class="name-cell" data-idx="' + i + '">'
           + '<span class="ico">' + fileIcon(it) + '</span>'
-          + '<span>' + esc(it.name) + '</span></div></td>';
-        h += '<td class="col-size">' + (it.isdir ? "-" : esc(it.size_h)) + '</td>';
+          + '<span class="fname" title="' + esc(it.name) + '">'
+          + esc(it.name) + '</span>'
+          + (it.isdir ? '<span class="dir-tag">文件夹</span>' : '')
+          + '</div></td>';
+        h += '<td class="col-size">' + (it.isdir ? "—" : esc(it.size_h)) + '</td>';
         h += '<td class="col-act"></td>';
         h += '</tr>';
       });
@@ -674,9 +773,9 @@
   /* ---------------- 事件绑定 ---------------- */
   function bind() {
     // 登录 tab
-    document.querySelectorAll(".login-card .tab").forEach(function (tab) {
+    document.querySelectorAll(".login-card .seg-tab").forEach(function (tab) {
       tab.onclick = function () {
-        document.querySelectorAll(".login-card .tab").forEach(function (t) {
+        document.querySelectorAll(".login-card .seg-tab").forEach(function (t) {
           t.classList.remove("active");
         });
         tab.classList.add("active");
@@ -710,9 +809,9 @@
       });
     };
 
-    // 主视图 tab
-    document.querySelectorAll(".main-tabs .tab").forEach(function (tab) {
-      tab.onclick = function () { switchView(tab.dataset.view); };
+    // 侧边导航
+    document.querySelectorAll(".side-nav .nav-item").forEach(function (item) {
+      item.onclick = function () { switchView(item.dataset.view); };
     });
 
     $("btnUp").onclick = function () {
@@ -724,6 +823,12 @@
       loadCloud(parent);
     };
     $("btnRefreshCloud").onclick = function () { loadCloud(cloudPath); };
+
+    // 搜索过滤 (本地过滤, 不重新请求)
+    var searchEl = $("cloudSearch");
+    if (searchEl) {
+      searchEl.oninput = function () { renderCloud(); };
+    }
 
     // 排序切换
     document.querySelectorAll(".sort-btn").forEach(function (btn) {
@@ -758,8 +863,8 @@
       updateBatchBar();
     };
 
-    // 批量下载
-    $("btnBatchDownload").onclick = function () {
+    // 批量下载 (顶部按钮与批量栏按钮共用)
+    function doBatchDownload(btn) {
       var items = Object.keys(selected).map(function (k) {
         var it = selected[k];
         return {
@@ -776,7 +881,7 @@
 
       // 先弹窗选目录, 确认后再提交
       askDownloadDir(desc + " — 选择保存目录", function (dir) {
-        var btn = $("btnBatchDownload");
+        var old = btn.textContent;
         btn.disabled = true;
         btn.textContent = "处理中…";
 
@@ -798,10 +903,13 @@
             toast("批量下载失败: " + e.message, 4000);
           }).then(function () {
             btn.disabled = false;
-            btn.textContent = "下载选中";
+            btn.textContent = old;
           });
       });
-    };
+    }
+
+    $("btnBatchDownload").onclick = function () { doBatchDownload(this); };
+    $("btnBatchDownloadInline").onclick = function () { doBatchDownload(this); };
 
     // ---- 弹窗内部 ----
     $("dirPickerClose").onclick = closeDirPicker;
