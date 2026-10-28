@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>百度网盘下载器</title>
+<title>百度网盘</title>
 <script>
   // 计算资源基址: 兼容直连(/)与 fnOS CGI 通道(/cgi/ThirdParty/<app>/index.cgi/)
   (function () {
@@ -18,26 +18,29 @@
 <body>
 
 <div id="app">
-  <!-- 顶部 -->
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">☁</span>
-      <span>百度网盘下载器</span>
-      <span class="badge" id="verBadge">v1.0.0</span>
-    </div>
-    <div class="top-right">
-      <span class="user" id="userInfo">未登录</span>
-      <button class="btn ghost sm" id="btnLogout" style="display:none">退出</button>
-    </div>
-  </header>
-
-  <!-- 未登录 -->
+  <!-- ============ 未登录 ============ -->
   <section id="loginView" class="login-wrap">
-    <div class="card login-card">
-      <h2>登录百度网盘</h2>
-      <div class="tabs">
-        <button class="tab active" data-tab="qr">扫码登录</button>
-        <button class="tab" data-tab="cookie">Cookie 登录</button>
+    <div class="login-card">
+      <div class="login-logo">
+        <svg viewBox="0 0 48 48" width="42" height="42" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#4d9bff"/>
+              <stop offset="1" stop-color="#2b6ef2"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="44" height="44" rx="11" fill="url(#lg)"/>
+          <path d="M24 12c-5 0-9.2 3.6-10 8.3A6.8 6.8 0 0 0 15 34h4v-3h-4a3.8 3.8 0 0 1-.6-7.5l1.7-.3.3-1.7A7 7 0 0 1 31 21l.5 1.9 2 .2a3.6 3.6 0 0 1-.4 7.1h-3.3v3H33a6.6 6.6 0 0 0 .7-13.2A10 10 0 0 0 24 12z"
+                fill="#fff"/>
+          <path d="M22.2 32.4 24 34l5.2-5.2-1.4-1.4-3.8 3.8-1.8-1.8-1.4 1.4z" fill="#fff"/>
+        </svg>
+      </div>
+      <h1>登录百度网盘</h1>
+      <p class="login-sub">登录后可浏览网盘文件并高速下载到 NAS</p>
+
+      <div class="seg-tabs">
+        <button class="seg-tab active" data-tab="qr">扫码登录</button>
+        <button class="seg-tab" data-tab="cookie">Cookie 登录</button>
       </div>
 
       <div id="tabQr" class="tab-pane">
@@ -45,161 +48,306 @@
           <img id="qrImg" alt="二维码" />
           <div id="qrMask" class="qr-mask">加载中…</div>
         </div>
-        <p class="hint" id="qrMsg">请使用百度 App 扫码登录</p>
-        <button class="btn ghost sm" id="btnQrRefresh">刷新二维码</button>
+        <p class="qr-hint" id="qrMsg">请使用百度 App 扫码登录</p>
+        <button class="link-btn" id="btnQrRefresh">刷新二维码</button>
       </div>
 
       <div id="tabCookie" class="tab-pane" style="display:none">
-        <p class="hint">
+        <p class="login-tip">
           从 PC 版百度网盘提取 <code>BDUSS</code>，或粘贴完整 cookie 串。
         </p>
         <textarea id="cookieInput" rows="5"
           placeholder="BDUSS=xxxxxx; STOKEN=xxxxxx"></textarea>
-        <button class="btn primary" id="btnCookieLogin">登录</button>
-        <p class="hint" id="cookieMsg"></p>
+        <button class="btn primary block" id="btnCookieLogin">登录</button>
+        <p class="login-tip" id="cookieMsg"></p>
       </div>
     </div>
   </section>
 
-  <!-- 主界面 -->
-  <section id="mainView" style="display:none">
-    <nav class="tabs main-tabs">
-      <button class="tab active" data-view="cloud">网盘文件</button>
-      <button class="tab" data-view="tasks">下载任务 <span class="dot" id="taskDot"></span></button>
-      <button class="tab" data-view="local">本地目录</button>
-      <button class="tab" data-view="settings">设置</button>
-    </nav>
+  <!-- ============ 主界面 ============ -->
+  <section id="mainView" class="main-shell" style="display:none">
 
-    <!-- 网盘文件 -->
-    <div id="viewCloud" class="view">
-      <div class="toolbar">
-        <button class="btn ghost sm" id="btnUp">↑ 上级</button>
-        <span class="path" id="cloudPath">/</span>
-        <div class="sort-box">
-          <span class="sort-label">排序</span>
-          <button class="sort-btn active" data-order="time" data-desc="1">修改时间 ↓</button>
-          <button class="sort-btn" data-order="time" data-desc="0">修改时间 ↑</button>
-          <button class="sort-btn" data-order="name" data-desc="0">名称 A→Z</button>
-          <button class="sort-btn" data-order="name" data-desc="1">名称 Z→A</button>
+    <!-- 左侧边栏 -->
+    <aside class="sidebar">
+      <div class="side-brand">
+        <svg viewBox="0 0 48 48" width="26" height="26" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#4d9bff"/>
+              <stop offset="1" stop-color="#2b6ef2"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="44" height="44" rx="11" fill="url(#lg2)"/>
+          <path d="M24 12c-5 0-9.2 3.6-10 8.3A6.8 6.8 0 0 0 15 34h4v-3h-4a3.8 3.8 0 0 1-.6-7.5l1.7-.3.3-1.7A7 7 0 0 1 31 21l.5 1.9 2 .2a3.6 3.6 0 0 1-.4 7.1h-3.3v3H33a6.6 6.6 0 0 0 .7-13.2A10 10 0 0 0 24 12z"
+                fill="#fff"/>
+        </svg>
+        <span class="side-title">百度网盘</span>
+      </div>
+
+      <!-- 用户卡 -->
+      <div class="user-card">
+        <div class="avatar" id="userAvatar">百</div>
+        <div class="user-meta">
+          <div class="user-name" id="userInfo">未登录</div>
+          <div class="user-tag">
+            <span class="vip-tag">会员</span>
+            <span class="ver-tag" id="verBadge">v1.0.0</span>
+          </div>
         </div>
-        <button class="btn ghost sm" id="btnRefreshCloud">刷新</button>
       </div>
 
-      <!-- 批量操作栏 -->
-      <div class="batch-bar" id="batchBar" style="display:none">
-        <label class="chk-label">
-          <input type="checkbox" id="chkAll"> 全选
-        </label>
-        <span class="sel-info" id="selInfo">已选 0 项</span>
-        <button class="btn primary sm" id="btnBatchDownload">下载选中</button>
-        <button class="btn ghost sm" id="btnClearSel">清空</button>
-      </div>
-
-      <div class="table-wrap">
-        <table class="file-table">
-          <thead><tr>
-            <th class="col-chk"><input type="checkbox" id="chkAllHead"></th>
-            <th>名称</th><th class="col-size">大小</th><th class="col-time">修改时间</th><th class="col-act">操作</th>
-          </tr></thead>
-          <tbody id="cloudBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- 下载任务 -->
-    <div id="viewTasks" class="view" style="display:none">
-      <div class="toolbar">
-        <button class="btn ghost sm" id="btnRefreshTasks">刷新</button>
-        <span class="hint" id="taskSummary"></span>
-      </div>
-
-      <!-- 总速度总览 -->
-      <div class="speed-panel" id="speedPanel">
-        <div class="speed-main">
-          <span class="speed-num" id="totalSpeed">0.00</span>
-          <span class="speed-unit">MB/s</span>
-          <span class="speed-label">总速度</span>
+      <!-- 导航 -->
+      <nav class="side-nav">
+        <div class="nav-group">
+          <div class="nav-group-title">我的文件</div>
+          <a class="nav-item active" data-view="cloud">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M2.5 6.2A2.2 2.2 0 0 1 4.7 4h3l1.4 1.6h6.2a2.2 2.2 0 0 1 2.2 2.2v6A2.2 2.2 0 0 1 15.3 16H4.7a2.2 2.2 0 0 1-2.2-2.2V6.2z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+            <span>全部文件</span>
+          </a>
         </div>
-        <div class="speed-detail">
-          <span id="speedRunning">运行中 0</span>
-          <span id="speedQueued">排队 0</span>
-          <span id="speedDone">已完成 0</span>
-          <span id="speedPaused">已暂停 0</span>
-          <span id="speedTotalBytes">已下载 0 B</span>
-          <span id="speedEta" class="speed-eta"></span>
+        <div class="nav-group">
+          <div class="nav-group-title">传输列表</div>
+          <a class="nav-item" data-view="tasks">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M10 3v9m0 0 3.4-3.4M10 12 6.6 8.6M3.5 14.5v1.2c0 .7.6 1.3 1.3 1.3h10.4c.7 0 1.3-.6 1.3-1.3v-1.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <span>下载到 NAS</span>
+            <span class="nav-dot" id="taskDot"></span>
+          </a>
+          <a class="nav-item" data-view="local">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M10 14V5m0 0 3.4 3.4M10 5 6.6 8.4M3.5 14.5v1.2c0 .7.6 1.3 1.3 1.3h10.4c.7 0 1.3-.6 1.3-1.3v-1.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <span>本地文件</span>
+          </a>
         </div>
-        <div class="speed-spark" id="speedSpark"></div>
-      </div>
+        <div class="nav-group">
+          <div class="nav-group-title">设置</div>
+          <a class="nav-item" data-view="settings">
+            <svg viewBox="0 0 20 20" width="16" height="16"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 3.2v1.6M10 15.2v1.6M3.2 10h1.6M15.2 10h1.6M5.2 5.2l1.1 1.1M13.7 13.7l1.1 1.1M14.8 5.2l-1.1 1.1M6.3 13.7l-1.1 1.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            <span>传输设置</span>
+          </a>
+        </div>
+      </nav>
 
-      <!-- 批量操作栏 -->
-      <div class="batch-bar" id="taskBatchBar">
-        <label class="chk-label">
-          <input type="checkbox" id="taskChkAll"> 全选
-        </label>
-        <span class="sel-info" id="taskSelInfo">已选 0 项</span>
-        <button class="btn ghost sm" id="btnTaskPauseAll">全部暂停</button>
-        <button class="btn ghost sm" id="btnTaskResumeAll">全部开始</button>
-        <button class="btn ghost sm" id="btnTaskBatchPause" disabled>暂停选中</button>
-        <button class="btn ghost sm" id="btnTaskBatchResume" disabled>开始选中</button>
-        <button class="btn danger sm" id="btnTaskDeleteDone">清除已完成</button>
-        <button class="btn danger sm" id="btnTaskBatchDelete" disabled>删除选中</button>
+      <!-- 容量条 -->
+      <div class="side-foot">
+        <div class="quota-bar"><i id="quotaFill" style="width:0%"></i></div>
+        <div class="quota-text" id="quotaText">—</div>
+        <button class="link-btn" id="btnLogout" style="display:none">退出登录</button>
       </div>
+    </aside>
 
-      <div id="taskList" class="task-list">
-        <div class="empty">暂无任务</div>
-      </div>
-    </div>
+    <!-- 右侧内容区 -->
+    <main class="content">
 
-    <!-- 本地目录 -->
-    <div id="viewLocal" class="view" style="display:none">
-      <div class="toolbar">
-        <button class="btn ghost sm" id="btnUpLocal">↑ 上级</button>
-        <span class="path" id="localPath">/</span>
-        <button class="btn ghost sm" id="btnRefreshLocal">刷新</button>
-      </div>
-      <div class="table-wrap">
-        <table class="file-table">
-          <thead><tr><th>名称</th><th class="col-size">大小</th><th class="col-act">操作</th></tr></thead>
-          <tbody id="localBody"><tr><td colspan="3" class="empty">加载中…</td></tr></tbody>
-        </table>
-      </div>
-    </div>
+      <!-- ========== 全部文件 ========== -->
+      <div id="viewCloud" class="view">
+        <header class="view-head">
+          <h2 class="view-title">我的文件</h2>
+          <div class="head-actions">
+            <div class="search-box">
+              <svg viewBox="0 0 20 20" width="15" height="15"><circle cx="8.7" cy="8.7" r="5.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m12.8 12.8 3.4 3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <input id="cloudSearch" type="text" placeholder="搜索">
+            </div>
+            <button class="btn primary" id="btnBatchDownload" style="display:none">
+              下载选中
+            </button>
+          </div>
+        </header>
 
-    <!-- 设置 -->
-    <div id="viewSettings" class="view" style="display:none">
-      <div class="card">
-        <h3>下载设置</h3>
-        <div class="form-row">
-          <label>默认下载目录</label>
-          <input id="setDir" type="text" placeholder="/vol1/1001/Backup">
-          <button class="btn ghost sm" id="btnPickDefaultDir">浏览…</button>
-        </div>
-        <div class="form-row">
-          <label>单任务并发</label>
-          <input id="setConns" type="number" min="1" max="128" value="64">
-          <span class="hint">建议 64；实测 64 连接最快</span>
-        </div>
-        <div class="form-row">
-          <label>总连接预算</label>
-          <input id="setTotalConns" type="number" min="4" max="128" value="64">
-          <span class="hint">所有任务合计的连接上限，超过 64 反而更慢</span>
-        </div>
-        <div class="form-row">
-          <label>同时下载任务数</label>
-          <input id="setMaxActive" type="number" min="1" max="3" value="1">
-          <span class="hint">默认 1，最高 3。1 个任务能跑满带宽</span>
-        </div>
-        <div class="form-row">
-          <label>总下载限速</label>
-          <input id="setSpeedLimit" type="number" min="0" max="500"
-                 step="0.5" value="0">
-          <span class="hint">MB/s。所有任务合计上限，0 = 不限速（最大速率）</span>
+        <!-- 路径栏 + 排序 -->
+        <div class="toolbar">
+          <button class="icon-btn" id="btnUp" title="上一级">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M12.5 5 7.5 10l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="breadcrumb" id="cloudPath">我的文件</div>
+          <div class="toolbar-right">
+            <div class="sort-box">
+              <button class="sort-btn active" data-order="time" data-desc="1">修改时间</button>
+              <button class="sort-btn" data-order="name" data-desc="0">名称</button>
+            </div>
+            <button class="icon-btn" id="btnRefreshCloud" title="刷新">
+              <svg viewBox="0 0 20 20" width="16" height="16"><path d="M16 10a6 6 0 1 1-1.8-4.3M16 3.6V7h-3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
         </div>
 
-        <button class="btn primary" id="btnSaveSettings">保存</button>
-        <p class="hint" id="setMsg"></p>
+        <!-- 批量栏 -->
+        <div class="batch-bar" id="batchBar" style="display:none">
+          <label class="chk-label">
+            <input type="checkbox" id="chkAll"> 全选
+          </label>
+          <span class="sel-info" id="selInfo">已选 0 项</span>
+          <button class="btn primary sm" id="btnBatchDownloadInline">下载选中</button>
+          <button class="btn ghost sm" id="btnClearSel">清空</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="file-table">
+            <thead><tr>
+              <th class="col-chk"><input type="checkbox" id="chkAllHead"></th>
+              <th class="col-name">文件名</th>
+              <th class="col-size">大小</th>
+              <th class="col-time">修改时间</th>
+              <th class="col-act"></th>
+            </tr></thead>
+            <tbody id="cloudBody">
+              <tr><td colspan="5" class="empty">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+
+      <!-- ========== 下载任务 ========== -->
+      <div id="viewTasks" class="view" style="display:none">
+        <header class="view-head">
+          <h2 class="view-title">传输列表</h2>
+          <div class="head-actions">
+            <button class="btn ghost sm" id="btnTaskResumeAll">全部开始</button>
+            <button class="btn ghost sm" id="btnTaskPauseAll">全部暂停</button>
+            <button class="btn ghost sm" id="btnRefreshTasks">刷新</button>
+          </div>
+        </header>
+
+        <!-- 总览卡片 -->
+        <div class="overview">
+          <div class="ov-speed">
+            <span class="ov-num" id="totalSpeed">0.00</span>
+            <span class="ov-unit">MB/s</span>
+          </div>
+          <div class="ov-stats">
+            <div class="ov-stat"><b id="speedRunning">0</b><span>进行中</span></div>
+            <div class="ov-stat"><b id="speedQueued">0</b><span>排队中</span></div>
+            <div class="ov-stat"><b id="speedDone">0</b><span>已完成</span></div>
+            <div class="ov-stat"><b id="speedPaused">0</b><span>已暂停</span></div>
+            <div class="ov-stat wide"><b id="speedTotalBytes">0 B</b><span>已下载</span></div>
+            <div class="ov-stat wide"><b id="speedEta">—</b><span>剩余时间</span></div>
+          </div>
+          <div class="ov-spark" id="speedSpark"></div>
+        </div>
+
+        <!-- 批量栏 -->
+        <div class="batch-bar" id="taskBatchBar">
+          <label class="chk-label">
+            <input type="checkbox" id="taskChkAll"> 全选
+          </label>
+          <span class="sel-info" id="taskSelInfo">已选 0 项</span>
+          <button class="btn ghost sm" id="btnTaskBatchPause" disabled>暂停选中</button>
+          <button class="btn ghost sm" id="btnTaskBatchResume" disabled>开始选中</button>
+          <button class="btn ghost sm" id="btnTaskDeleteDone">清除已完成</button>
+          <button class="btn ghost sm" id="btnTaskBatchDelete" disabled>删除选中</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="task-table">
+            <thead><tr>
+              <th class="col-chk"><input type="checkbox" id="taskChkAllHead" style="display:none"></th>
+              <th class="col-name">文件名</th>
+              <th class="col-size">大小</th>
+              <th class="col-speed">速度</th>
+              <th class="col-eta">剩余</th>
+              <th class="col-state">状态</th>
+              <th class="col-act"></th>
+            </tr></thead>
+            <tbody id="taskList">
+              <tr><td colspan="7" class="empty">暂无任务</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========== 本地文件 ========== -->
+      <div id="viewLocal" class="view" style="display:none">
+        <header class="view-head">
+          <h2 class="view-title">本地文件</h2>
+          <div class="head-actions">
+            <button class="btn ghost sm" id="btnRefreshLocal">刷新</button>
+          </div>
+        </header>
+        <div class="toolbar">
+          <button class="icon-btn" id="btnUpLocal" title="上一级">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M12.5 5 7.5 10l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="breadcrumb" id="localPath">/</div>
+        </div>
+        <div class="table-wrap">
+          <table class="file-table">
+            <thead><tr>
+              <th class="col-name">名称</th>
+              <th class="col-size">大小</th>
+              <th class="col-act"></th>
+            </tr></thead>
+            <tbody id="localBody">
+              <tr><td colspan="3" class="empty">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ========== 设置 ========== -->
+      <div id="viewSettings" class="view" style="display:none">
+        <header class="view-head">
+          <h2 class="view-title">传输设置</h2>
+        </header>
+
+        <div class="settings-card">
+          <div class="set-row">
+            <div class="set-label">
+              <div class="set-name">默认下载目录</div>
+              <div class="set-desc">首次弹窗的起始位置</div>
+            </div>
+            <div class="set-control">
+              <input id="setDir" type="text" placeholder="/vol1/1001/Backup">
+              <button class="btn ghost sm" id="btnPickDefaultDir">浏览</button>
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-label">
+              <div class="set-name">单任务并发</div>
+              <div class="set-desc">单个任务最多开几条连接，建议 64</div>
+            </div>
+            <div class="set-control">
+              <input id="setConns" type="number" min="1" max="128" value="64">
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-label">
+              <div class="set-name">总连接预算</div>
+              <div class="set-desc">所有任务合计的连接上限，超过 64 反而更慢</div>
+            </div>
+            <div class="set-control">
+              <input id="setTotalConns" type="number" min="4" max="128" value="64">
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-label">
+              <div class="set-name">同时下载任务数</div>
+              <div class="set-desc">默认 1，最高 3。1 个任务能跑满带宽</div>
+            </div>
+            <div class="set-control">
+              <input id="setMaxActive" type="number" min="1" max="3" value="1">
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-label">
+              <div class="set-name">总下载限速</div>
+              <div class="set-desc">MB/s，0 表示不限速（最大速率）</div>
+            </div>
+            <div class="set-control">
+              <input id="setSpeedLimit" type="number" min="0" max="500"
+                     step="0.5" value="0">
+            </div>
+          </div>
+        </div>
+
+        <div class="set-foot">
+          <button class="btn primary" id="btnSaveSettings">保存设置</button>
+          <span class="set-msg" id="setMsg"></span>
+        </div>
+      </div>
+
+    </main>
   </section>
 </div>
 
@@ -208,24 +356,30 @@
   <div class="modal">
     <div class="modal-head">
       <h3 id="dirPickerTitle">选择下载目录</h3>
-      <button class="modal-close" id="dirPickerClose">×</button>
+      <button class="modal-close" id="dirPickerClose">
+        <svg viewBox="0 0 20 20" width="16" height="16"><path d="m5 5 10 10M15 5 5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
     </div>
 
     <div class="modal-body">
       <div class="toolbar" style="margin-bottom:10px">
-        <button class="btn ghost sm" id="dpUp">↑ 上级</button>
-        <span class="path" id="dpPath">/</span>
-        <button class="btn ghost sm" id="dpRefresh">刷新</button>
+        <button class="icon-btn" id="dpUp" title="上一级">
+          <svg viewBox="0 0 20 20" width="16" height="16"><path d="M12.5 5 7.5 10l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="breadcrumb" id="dpPath">/</div>
+        <div class="toolbar-right">
+          <button class="icon-btn" id="dpRefresh" title="刷新">
+            <svg viewBox="0 0 20 20" width="16" height="16"><path d="M16 10a6 6 0 1 1-1.8-4.3M16 3.6V7h-3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
       </div>
       <div class="dp-list" id="dpList">
         <div class="empty">加载中…</div>
       </div>
-      <p class="hint" style="text-align:left;margin-top:8px">
-        提示：双击文件夹进入，点击一次选中。也可以直接在下方输入路径。
+      <p class="modal-tip">
+        双击文件夹进入，单击选中。也可以直接在下方输入路径。
       </p>
-      <input id="dpManual" type="text" placeholder="/vol1/1001/电影"
-             style="width:100%;border:1px solid var(--line);border-radius:8px;
-                    padding:8px 12px;font-size:13px;font-family:monospace">
+      <input id="dpManual" type="text" placeholder="/vol1/1001/电影" class="path-input">
     </div>
 
     <div class="modal-foot">
