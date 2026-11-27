@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ============================================================
 APP_ID = "250528"
 APP_NAME = "百度网盘下载器"
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 UA_PC = ("netdisk;P2SP;3.0.0.8;netdisk;11.12.0;PC;PC-Windows;10.0.19045;"
          "WindowsBaiduYunGuanJia")
@@ -273,6 +273,53 @@ def bd_userinfo():
             "errno": j.get("errno", -1)}
 
 
+def _invalidate_login(reason=""):
+    """标记登录态失效
+
+    百度接口返回 errno=-6 / 9019 等时, 说明 BDUSS 已过期或被风控。
+    这里清掉 cookie, 让 /api/status 返回未登录, 前端自动跳回登录页。
+    """
+    c = STATE["config"]
+    if not c.get("cookie"):
+        return
+    log("登录态失效 (%s), 已清除 cookie, 需要重新登录" % (reason or "-"))
+    c["cookie"] = ""
+    c["bdstoken"] = ""
+    c["uk"] = ""
+    c["user_name"] = ""
+    c["_login_invalid"] = reason or "expired"
+    try:
+        save_config()
+    except Exception:
+        pass
+
+
+def bd_session_valid():
+    """主动校验登录态是否还有效
+
+    用 uinfo 接口探测。注意: 百度对 list/filemetas 的校验比 uinfo 严格,
+    uinfo 通过不代表 list 能用, 所以这里只是粗筛, 真正的判定还是在
+    具体接口报 errno=-6 时走 _invalidate_login()。
+    """
+    c = STATE["config"]
+    if not c.get("cookie"):
+        return False
+    try:
+        u = ("https://pan.baidu.com/rest/2.0/xpan/nas?method=uinfo"
+             "&clienttype=0&app_id=%s" % APP_ID)
+        t = http_text(u, headers=bd_headers(UA_PC), timeout=15)
+        j = json.loads(t)
+        if j.get("errno") == 0 and j.get("uk"):
+            c["uk"] = str(j.get("uk"))
+            nm = j.get("baidu_name") or j.get("netdisk_name") or ""
+            if nm:
+                c["user_name"] = nm
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def bd_quota():
     """查询网盘容量与会员信息 (用于侧边栏容量条)
 
@@ -323,6 +370,9 @@ def bd_quota():
             elif vt == "1":
                 out["vip"] = "会员"
                 out["is_vip"] = True
+        elif j2.get("errno") in (-6, -7):
+            # 连用户信息都取不到, 说明真的失效了
+            _invalidate_login("quota/uinfo")
     except Exception:
         pass
     return out
@@ -354,8 +404,14 @@ def bd_list(dirpath, order="time", desc=True):
     if j.get("errno") not in (0, None):
         j = _fetch("name", "0")
     if j.get("errno") not in (0, None):
+        e = j.get("errno")
+        # errno=-6 是百度典型的「未登录 / 登录态失效」
+        # 此时把登录态标记为失效, 让前端跳回登录页, 而不是反复报错
+        if e in (-6, -7, 9019, 111):
+            _invalidate_login("list")
+            raise RuntimeError("登录已失效，请重新登录")
         raise RuntimeError("list errno=%s msg=%s"
-                           % (j.get("errno"), j.get("errmsg")))
+                           % (e, j.get("errmsg")))
     out = []
     for it in (j.get("list") or []):
         out.append({
@@ -1029,11 +1085,43 @@ def cookie_login(cookie_text):
         raise RuntimeError("cookie 里没有有效的 BDUSS")
     STATE["config"]["cookie"] = ck
     STATE["config"]["bdstoken"] = ""
+    STATE["config"].pop("_login_invalid", None)
     save_config()
     info = bd_userinfo()
     if not info.get("uk"):
         raise RuntimeError("cookie 无效或已过期")
+    # uinfo 通过不代表 list 能用, 再验一下列表接口
+    if not _probe_list():
+        STATE["config"]["cookie"] = ""
+        STATE["config"]["bdstoken"] = ""
+        STATE["config"]["uk"] = ""
+        STATE["config"]["user_name"] = ""
+        save_config()
+        raise RuntimeError("cookie 已被限制访问文件列表，请在浏览器重新登录后提取新 cookie")
+    save_config()
     return info
+
+
+def _probe_list():
+    """探测 list 接口是否可用 (判断 cookie 是否真的能读文件)
+
+    百度对 uinfo 和 list 的校验严格程度不同: uinfo 可能通过,
+    但 list 仍返回 errno=-6。所以登录后必须实际试一次 list。
+    """
+    try:
+        tok = bd_bdstoken()
+        pp = {
+            "dir": "/", "order": "time", "desc": "1",
+            "num": "10", "start": "0", "web": "1",
+            "app_id": APP_ID, "bdstoken": tok,
+        }
+        uu = "https://pan.baidu.com/api/list?" + urllib.parse.urlencode(pp)
+        tt = http_text(uu, headers=bd_headers(UA_PC), timeout=20)
+        j = json.loads(tt)
+        return j.get("errno") == 0
+    except Exception as e:
+        log("probe_list 异常: %s" % e)
+        return False
 
 
 def logout():
@@ -1800,8 +1888,13 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/status":
                 c = STATE["config"]
+                has_ck = bool(c.get("cookie"))
+                # 有 cookie 但被标记失效时, 也要告诉前端需要重新登录
+                inv = c.get("_login_invalid") or ""
                 return self._json({
-                    "logged_in": bool(c.get("cookie")),
+                    "logged_in": has_ck and not inv,
+                    "expired": bool(inv) or (bool(c.get("cookie")) and not has_ck),
+                    "reason": inv,
                     "uk": c.get("uk", ""),
                     "name": c.get("user_name", ""),
                     "download_dir": c.get("download_dir", ""),
