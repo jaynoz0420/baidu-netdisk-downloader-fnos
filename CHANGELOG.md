@@ -1,5 +1,30 @@
 # 更新日志
 
+## v1.9.2
+
+**修复：扫码登录成功后立刻被弹回登录页**
+
+v1.9.1 引入的回归问题。
+
+原因：v1.9.1 加了 `_login_invalid` 失效标记，但只在 Cookie 登录路径清除了它：
+
+```python
+cookie_login()  →  pop("_login_invalid")   ✅
+_qr_worker()    →  漏了                     ❌
+```
+
+于是扫码虽然成功（BDUSS 已正确写入），但标记仍在，`/api/status` 返回
+`logged_in: false`，前端把用户弹回登录页。
+
+修复三处：
+
+1. **扫码成功后清除失效标记** — `_qr_worker()` 补上 `pop("_login_invalid")`
+2. **改用 list 探针做真实校验** — 原来用 `uinfo` 判断登录态不可靠：
+   实测出现过 `uinfo` 失败但 `list` 能正常读 38 项的情况。现在直接试一次
+   文件列表，以能不能读文件为准
+3. **简化 status 判定** — 去掉恒假的冗余表达式
+   `(bool(c.get("cookie")) and not has_ck)`
+
 ## v1.9.1
 
 **修复：登录过期后反复报 `list errno=-6`**
