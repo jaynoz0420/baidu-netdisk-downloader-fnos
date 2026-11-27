@@ -34,11 +34,30 @@
         if (!r.ok) {
           var e = new Error(j.errmsg || ("HTTP " + r.status));
           e.data = j;
+          // 后端判定登录失效 → 自动回到登录页
+          if (j && j.errmsg && j.errmsg.indexOf("登录") >= 0) {
+            handleLoginExpired(j.errmsg);
+          }
           throw e;
         }
         return j;
       });
     });
+  }
+
+  /* 登录失效处理: 切回登录页, 并提示原因 */
+  var _expiredHandled = false;
+  function handleLoginExpired(msg) {
+    if (_expiredHandled) return;
+    _expiredHandled = true;
+    $("loginView").style.display = "";
+    $("mainView").style.display = "none";
+    $("btnLogout").style.display = "none";
+    $("userInfo").textContent = "未登录";
+    toast(msg || "登录已失效，请重新登录", 5000);
+    startQr();
+    // 3 秒后允许再次触发
+    setTimeout(function () { _expiredHandled = false; }, 3000);
   }
 
   function esc(s) {
@@ -93,6 +112,12 @@
         $("mainView").style.display = "none";
         $("btnLogout").style.display = "none";
         $("userInfo").textContent = "未登录";
+        // 登录过期时给出明确提示
+        if (s.expired) {
+          toast("登录已过期，请重新扫码登录", 5000);
+          var qm = $("qrMsg");
+          if (qm) qm.textContent = "登录已过期，请重新扫码";
+        }
         startQr();
       }
     }).catch(function (e) {
@@ -231,8 +256,13 @@
       cloudList = r.list || [];
       renderCloud();
     }).catch(function (e) {
-      tb.innerHTML = '<tr><td colspan="5" class="empty">加载失败: '
-        + esc(e.message) + '</td></tr>';
+      var msg = e.message || "加载失败";
+      var tip = msg;
+      if (msg.indexOf("登录") >= 0) {
+        tip = "登录已失效，请重新扫码登录";
+      }
+      tb.innerHTML = '<tr><td colspan="5" class="empty">' + esc(tip)
+        + '</td></tr>';
     });
   }
 
