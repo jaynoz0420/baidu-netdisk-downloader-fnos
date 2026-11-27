@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # ============================================================
 APP_ID = "250528"
 APP_NAME = "百度网盘下载器"
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 
 UA_PC = ("netdisk;P2SP;3.0.0.8;netdisk;11.12.0;PC;PC-Windows;10.0.19045;"
          "WindowsBaiduYunGuanJia")
@@ -1033,14 +1033,21 @@ def _qr_worker(qid, st):
             ck += "; STOKEN=" + stoken
         STATE["config"]["cookie"] = ck
         STATE["config"]["bdstoken"] = ""
+        # 关键: 新登录成功必须清掉上次的失效标记, 否则 /api/status 一直
+        # 报 logged_in=false, 前端会反复把用户弹回登录页。
+        STATE["config"].pop("_login_invalid", None)
         save_config()
 
+        # 用 list 探针做真实校验 (uinfo 通过不代表能读文件)
+        ok = _probe_list()
         try:
-            info = bd_userinfo()
+            info = bd_userinfo() if ok else {}
         except Exception:
             info = {}
-        if not info.get("uk"):
-            log("扫码后 uinfo 校验失败, 但仍保存 cookie")
+        if not ok:
+            log("扫码后 list 探针失败, cookie 可能被限制")
+        elif not info.get("uk"):
+            log("扫码成功但 uinfo 未取到 uk (list 可用, 不影响使用)")
         else:
             log("扫码登录成功: %s (uk=%s)"
                 % (info.get("name") or "(无昵称)", info.get("uk")))
@@ -1889,12 +1896,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/status":
                 c = STATE["config"]
                 has_ck = bool(c.get("cookie"))
-                # 有 cookie 但被标记失效时, 也要告诉前端需要重新登录
                 inv = c.get("_login_invalid") or ""
+                # 只要 cookie 还在且没有失效标记, 就是已登录
+                logged = has_ck and not inv
                 return self._json({
-                    "logged_in": has_ck and not inv,
-                    "expired": bool(inv) or (bool(c.get("cookie")) and not has_ck),
-                    "reason": inv,
+                    "logged_in": logged,
+                    "expired": bool(inv) and not has_ck,
+                    "reason": inv if not logged else "",
                     "uk": c.get("uk", ""),
                     "name": c.get("user_name", ""),
                     "download_dir": c.get("download_dir", ""),
